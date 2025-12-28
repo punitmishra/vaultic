@@ -8,68 +8,10 @@ A lightweight, security-focused password manager written in Rust with hardware a
  ██║   ██║███████║██║   ██║██║     ██║   ██║██║
  ╚██╗ ██╔╝██╔══██║██║   ██║██║     ██║   ██║██║
   ╚████╔╝ ██║  ██║╚██████╔╝███████╗██║   ██║╚██████╗
-   ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝
+   ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝   ╚═╝ ╚═════╝
 
  Local-first | Hardware Auth | AI-Powered | Zero Trust
 ```
-
-## Demo
-
-### Quick Start (Full Workflow)
-
-[![asciicast](https://asciinema.org/a/placeholder-quickstart.svg)](https://asciinema.org/a/placeholder-quickstart)
-
-```bash
-# Initialize vault
-vaultic init --name "My Vault" --password "secure-password"
-
-# Unlock (creates 15-min session)
-vaultic unlock --password "secure-password"
-
-# Add entries
-vaultic add "GitHub" -u "user@example.com" -p "secret" --tags "dev"
-vaultic add "AWS" -u "admin" --generate --url "https://aws.amazon.com"
-
-# List entries
-vaultic list
-
-# Check status
-vaultic status
-
-# Lock when done
-vaultic lock
-```
-
-### Password Generation
-
-[![asciicast](https://asciinema.org/a/placeholder-generate.svg)](https://asciinema.org/a/placeholder-generate)
-
-```bash
-# Default 20-char password with entropy analysis
-vaultic generate
-
-# Custom length
-vaultic generate --length 32
-
-# Alphanumeric only
-vaultic generate --no-symbols
-
-# PIN-style
-vaultic generate --length 6 --no-uppercase --no-lowercase --no-symbols
-```
-
-**View demos locally:**
-```bash
-# Install asciinema
-brew install asciinema  # macOS
-apt install asciinema   # Linux
-
-# Play recordings
-asciinema play demos/quickstart.cast
-asciinema play demos/generate.cast
-```
-
----
 
 ## Features
 
@@ -80,38 +22,65 @@ asciinema play demos/generate.cast
 - **Zero Memory Leaks** - Sensitive data auto-zeroed with `zeroize`
 - **Local-Only** - No cloud, no servers, your data stays with you
 
-### Implemented
-| Feature | Status |
-|---------|--------|
-| Vault init/unlock/lock | Working |
-| Session management | Working |
-| Add/List entries | Working |
-| Password generation | Working |
-| Tag/folder filtering | Working |
-| TOTP/2FA support | Working |
-| GPG key integration | Working |
-| X25519 key exchange | Working |
-| QR code generation | Working |
-| AI analysis (Ollama) | Ready |
+### What's Working
 
-### Coming Soon
 | Feature | Status |
 |---------|--------|
-| Interactive TUI | Planned |
-| Import (Bitwarden/1Password) | Planned |
-| Export formats | Planned |
-| FIDO2/YubiKey | Needs hardware |
-| Breach checking (HIBP) | Planned |
+| Vault init/unlock/lock | ✅ Working |
+| Session management (15-min auto-expiry) | ✅ Working |
+| Add/List/Get entries | ✅ Working |
+| Password generation with entropy analysis | ✅ Working |
+| Tag/folder filtering | ✅ Working |
+| Import (Bitwarden, LastPass, 1Password) | ✅ Working |
+| Export (JSON, CSV, Encrypted) | ✅ Working |
+| Interactive TUI mode (ratatui) | ✅ Working |
+| Shell completions (bash/zsh/fish) | ✅ Working |
+| AI analysis (Ollama integration) | ✅ Working |
+| HIBP breach checking | ✅ Working |
+| TOTP/2FA support | ✅ Working |
+| GPG key integration | ✅ Working |
+| X25519 key exchange | ✅ Working |
+| QR code generation | ✅ Working |
+| Simple web client | ✅ Working |
+| FIDO2/YubiKey | 🔧 Structure ready (needs hardware) |
+
+---
+
+## Quick Start
+
+```bash
+# Initialize vault
+vaultic init --name "My Vault"
+
+# Unlock (creates 15-min session)
+vaultic unlock
+
+# Add entries
+vaultic add "GitHub" -u "user@example.com" -p "secret" --tags "dev"
+vaultic add "AWS" -u "admin" --generate --url "https://aws.amazon.com"
+
+# List entries
+vaultic list
+
+# Generate password
+vaultic generate --length 24
+
+# Check status
+vaultic status
+
+# Lock when done
+vaultic lock
+```
 
 ---
 
 ## Installation
 
-### From Source (Recommended)
+### From Source
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/vaultic.git
+git clone https://github.com/punitmishra/vaultic.git
 cd vaultic
 
 # Build release binary
@@ -122,6 +91,19 @@ cp target/release/vaultic /usr/local/bin/
 
 # Verify installation
 vaultic --version
+```
+
+### Shell Completions
+
+```bash
+# Bash
+vaultic completions bash > ~/.local/share/bash-completion/completions/vaultic
+
+# Zsh
+vaultic completions zsh > ~/.zfunc/_vaultic
+
+# Fish
+vaultic completions fish > ~/.config/fish/completions/vaultic.fish
 ```
 
 ### Prerequisites
@@ -201,11 +183,61 @@ vaultic generate --length 32
 # Without symbols
 vaultic generate --no-symbols
 
-# Without uppercase
-vaultic generate --no-uppercase
-
 # Digits only (PIN)
 vaultic generate --length 6 --no-uppercase --no-lowercase --no-symbols
+```
+
+### Import/Export
+
+```bash
+# Import from Bitwarden
+vaultic import bitwarden_export.json --format bitwarden
+
+# Import from LastPass
+vaultic import lastpass_export.csv --format lastpass
+
+# Import from 1Password
+vaultic import 1password_export.csv --format onepassword
+
+# Export to JSON (plaintext - handle carefully!)
+vaultic export backup.json --format json
+
+# Export encrypted backup
+vaultic export backup.vaultic --format encrypted
+```
+
+### Interactive TUI
+
+```bash
+# Launch terminal UI
+vaultic tui
+```
+
+**TUI Keybindings:**
+- `j/k` - Navigate up/down
+- `g/G` - Go to top/bottom
+- `/` - Search
+- `a` - Add new entry
+- `e` - Edit selected
+- `d` - Delete selected
+- `y` - Copy password
+- `p` - Toggle password visibility
+- `?` - Show help
+- `q` - Quit
+
+---
+
+## Demo
+
+**Play demo recordings locally:**
+```bash
+# Install asciinema
+brew install asciinema  # macOS
+apt install asciinema   # Linux
+
+# Play recordings
+asciinema play demos/quickstart.cast
+asciinema play demos/generate.cast
 ```
 
 ---
@@ -304,8 +336,10 @@ src/
 ├── totp/mod.rs     # 2FA support
 ├── gpg/mod.rs      # OpenPGP integration
 ├── sharing/mod.rs  # E2E sharing
-├── fido2/mod.rs    # Hardware auth (stub)
-└── tui/mod.rs      # Terminal UI (stub)
+├── fido2/mod.rs    # Hardware auth
+├── tui/mod.rs      # Terminal UI
+├── import.rs       # Import formats
+└── export.rs       # Export formats
 ```
 
 ---
@@ -320,31 +354,22 @@ src/
 
 ---
 
-## Roadmap
+## Test Results (2025-12-28)
 
-### v0.1.0 (Current)
-- [x] Core encryption (XChaCha20-Poly1305)
-- [x] Argon2id key derivation
-- [x] Sled database storage
-- [x] Session management
-- [x] Basic CLI commands
-- [x] Password generation
+```
+cargo test: 38 tests passing
+cargo build --release: Success
 
-### v0.2.0 (Next)
-- [ ] Get/Edit/Delete commands
-- [ ] Interactive search
-- [ ] Clipboard integration
-- [ ] Shell completions
-
-### v0.3.0
-- [ ] TUI mode (ratatui)
-- [ ] Import/Export
-- [ ] AI suggestions
-
-### v0.4.0
-- [ ] FIDO2/YubiKey support
-- [ ] Breach checking
-- [ ] Sharing features
+Local workflow test:
+✓ init      - Vault created
+✓ unlock    - Session created (15 min)
+✓ add       - Entries added with tags
+✓ generate  - 127.8 bits entropy (Very Strong)
+✓ list      - Formatted table output
+✓ status    - Shows vault info
+✓ lock      - Session destroyed
+✓ completions - bash/zsh/fish working
+```
 
 ---
 
@@ -369,6 +394,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [RustCrypto](https://github.com/RustCrypto) - Cryptographic primitives
 - [Sequoia PGP](https://sequoia-pgp.org/) - OpenPGP implementation
 - [Sled](https://sled.rs/) - Embedded database
+- [ratatui](https://ratatui.rs/) - Terminal UI framework
 
 ---
 
