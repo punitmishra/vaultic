@@ -1,0 +1,104 @@
+[package]
+name = "vaultic"
+version = "0.1.0"
+edition = "2021"
+authors = ["Punit"]
+description = "Local-first, hardware-secured password manager with AI-powered management"
+license = "MIT"
+repository = "https://github.com/yourusername/vaultic"
+keywords = ["password-manager", "security", "fido2", "encryption", "cli"]
+categories = ["command-line-utilities", "cryptography"]
+
+[dependencies]
+# CLI & TUI
+clap = { version = "4.5", features = ["derive", "env", "color"] }
+ratatui = "0.29"
+crossterm = "0.28"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+console = "0.15"
+indicatif = "0.17"
+colored = "2.1"
+tabled = "0.17"
+
+# Encryption & Security
+ring = "0.17"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+aes-gcm = "0.10"
+rand = "0.8"
+rand_core = "0.6"
+zeroize = { version = "1.8", features = ["derive"] }
+secrecy = { version = "0.10", features = ["serde"] }
+
+# FIDO2/WebAuthn (YubiKey support)
+ctap-hid-fido2 = "3.5"
+# authenticator = "0.4"  # Alternative FIDO2 crate
+
+# GPG Support
+sequoia-openpgp = "1.21"
+
+# Storage
+sled = "0.34"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+directories = "5.0"
+
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# AI Integration (local inference + optional API)
+# Using HTTP client for flexibility - can integrate llama.cpp or ollama
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+url = "2.5"
+clipboard = "0.5"
+toml = "0.8"
+fuzzy-matcher = "0.3"
+passwords = "3.1"
+
+# QR code for sharing
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+urlencoding = "2.1.3"
+dirs = "6.0.0"
+sha1 = "0.10.6"
+env_logger = "0.11.8"
+flate2 = "1.1.5"
+whoami = "1.6.1"
+
+[dev-dependencies]
+tempfile = "3.14"
+criterion = "0.5"
+proptest = "1.5"
+
+[features]
+default = ["fido2", "ai-local"]
+fido2 = []
+ai-local = []
+ai-cloud = []
+gpg = []
+
+[[bin]]
+name = "vaultic"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = "z"  # Optimize for size
