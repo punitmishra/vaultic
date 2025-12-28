@@ -1119,14 +1119,80 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Export { output, format } => {
-            Output::info(&format!("Exporting vault to '{}'...", output));
-            Output::warning("Export not yet implemented");
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr.load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+            let entries = storage.list_entries()?;
+
+            if entries.is_empty() {
+                Output::warning("No entries to export");
+                return Ok(());
+            }
+
+            match format {
+                ExportFormat::Json => {
+                    let data = crate::export::export_json(&entries)?;
+                    std::fs::write(&output, &data)?;
+                    Output::success(&format!("Exported {} entries to '{}'", entries.len(), output));
+                    Output::warning("Note: Passwords exported in plaintext. Handle with care!");
+                }
+                ExportFormat::Csv => {
+                    let data = crate::export::export_csv(&entries)?;
+                    std::fs::write(&output, &data)?;
+                    Output::success(&format!("Exported {} entries to '{}'", entries.len(), output));
+                    Output::warning("Note: Passwords exported in plaintext. Handle with care!");
+                }
+                ExportFormat::Encrypted => {
+                    let bytes = crate::export::export_encrypted(&entries, &master_key)?;
+                    std::fs::write(&output, &bytes)?;
+                    Output::success(&format!("Exported {} entries to '{}' (encrypted)", entries.len(), output));
+                }
+            }
             Ok(())
         }
 
         Commands::Import { input, format } => {
-            Output::info(&format!("Importing from '{}'...", input));
-            Output::warning("Import not yet implemented");
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr.load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let entries = match format {
+                ImportFormat::Bitwarden => {
+                    let data = std::fs::read_to_string(&input)?;
+                    crate::import::import_bitwarden(&data)?
+                }
+                ImportFormat::Lastpass => {
+                    let data = std::fs::read_to_string(&input)?;
+                    crate::import::import_lastpass(&data)?
+                }
+                ImportFormat::Onepassword => {
+                    let data = std::fs::read_to_string(&input)?;
+                    crate::import::import_1password(&data)?
+                }
+                ImportFormat::Encrypted => {
+                    let bytes = std::fs::read(&input)?;
+                    crate::import::import_encrypted(&bytes, &master_key)?
+                }
+                ImportFormat::Json | ImportFormat::Csv => {
+                    return Err("Use --format bitwarden, lastpass, onepassword, or encrypted".into());
+                }
+            };
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            let mut imported = 0;
+            for entry in entries {
+                storage.add_entry(&entry)?;
+                imported += 1;
+            }
+
+            Output::success(&format!("Imported {} entries from '{}'", imported, input));
             Ok(())
         }
 

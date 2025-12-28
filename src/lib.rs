@@ -44,8 +44,10 @@
 pub mod ai;
 pub mod cli;
 pub mod crypto;
+pub mod export;
 pub mod fido2;
 pub mod gpg;
+pub mod import;
 pub mod models;
 pub mod session;
 pub mod sharing;
@@ -210,6 +212,14 @@ pub enum VaulticError {
     /// AI errors
     #[error("AI error: {0}")]
     Ai(#[from] ai::AiError),
+
+    /// Export errors
+    #[error("Export error: {0}")]
+    Export(#[from] export::ExportError),
+
+    /// Import errors
+    #[error("Import error: {0}")]
+    Import(#[from] import::ImportError),
 
     /// IO errors
     #[error("IO error: {0}")]
