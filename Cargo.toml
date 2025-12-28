@@ -12,6 +12,7 @@ categories = ["command-line-utilities", "cryptography"]
 [dependencies]
 # CLI & TUI
 clap = { version = "4.5", features = ["derive", "env", "color"] }
+clap_complete = "4.5"
 ratatui = "0.29"
 crossterm = "0.28"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }

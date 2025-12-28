@@ -10,7 +10,8 @@
 use std::io::{self, Write};
 use std::time::Duration;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use console::{style, Term};
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, Password, Select};
@@ -300,6 +301,13 @@ pub enum Commands {
 
         /// Config value (omit to show current)
         value: Option<String>,
+    },
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
 
@@ -1255,6 +1263,13 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     Output::warning("Config management not yet implemented");
                 }
             }
+            Ok(())
+        }
+
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, name, &mut io::stdout());
             Ok(())
         }
     }
