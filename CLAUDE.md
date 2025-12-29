@@ -16,7 +16,7 @@ This document provides context for Claude to continue developing Vaultic.
 
 ## Current Status: ~98% Complete
 
-### Checkpoint: 2025-12-28 (Updated)
+### Checkpoint: 2025-12-28 (Final)
 
 **Build Status**: COMPILING AND RUNNING
 **Tests**: 42 passing
@@ -267,12 +267,13 @@ rm -rf /tmp/test_vault
 
 1. **98% complete** - Only polish and optional features remain
 2. **42 tests passing** - Keep them green
-3. **TUI is fully working** - Uses ratatui + crossterm
+3. **TUI is fully working** - Tested and confirmed working by user
 4. **Session system works** - Don't recreate it
 5. **--password flag exists** - For non-interactive testing
 6. **Import/Export working** - Bitwarden, LastPass, 1Password
 7. **Web client exists** - Simple demo in web/index.html
 8. **Shell completions work** - bash, zsh, fish, powershell
+9. **README is comprehensive** - Includes TUI mockup and full keybindings
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)
