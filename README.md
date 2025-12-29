@@ -208,22 +208,55 @@ vaultic export backup.vaultic --format encrypted
 
 ### Interactive TUI
 
+Launch a full-screen terminal interface for managing your passwords:
+
 ```bash
+# Make sure vault is unlocked first
+vaultic unlock
+
 # Launch terminal UI
 vaultic tui
 ```
 
-**TUI Keybindings:**
-- `j/k` - Navigate up/down
-- `g/G` - Go to top/bottom
-- `/` - Search
-- `a` - Add new entry
-- `e` - Edit selected
-- `d` - Delete selected
-- `y` - Copy password
-- `p` - Toggle password visibility
-- `?` - Show help
-- `q` - Quit
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Vaultic - Password Manager                                  │
+├──────────────────────────────────────────────────────────────┤
+│ Entries (3)                                                  │
+│                                                              │
+│ ▶ AWS Console  admin@company.com  [cloud, work]             │
+│   GitHub       dev@example.com    [dev, code]               │
+│   Gmail        user@gmail.com     [personal]                │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│ j/k:nav  /:search  Enter:view  y:copy  d:delete  ?:help     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**TUI Features:**
+- Entry list with fuzzy search
+- Detail view with password show/hide
+- Copy password to clipboard
+- Delete with confirmation
+- Vim-style navigation
+
+**Keybindings:**
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `g` | Go to first entry |
+| `G` | Go to last entry |
+| `/` | Search entries |
+| `Enter` | View entry details |
+| `y` | Copy password to clipboard |
+| `p` | Toggle password visibility (in detail view) |
+| `d` | Delete entry (with confirmation) |
+| `r` | Refresh entries |
+| `?` | Show help screen |
+| `Esc` | Cancel / go back |
+| `q` | Quit |
 
 ---
 
@@ -357,17 +390,18 @@ src/
 ## Test Results (2025-12-28)
 
 ```
-cargo test: 38 tests passing
+cargo test: 42 tests passing
 cargo build --release: Success
 
 Local workflow test:
-✓ init      - Vault created
-✓ unlock    - Session created (15 min)
-✓ add       - Entries added with tags
-✓ generate  - 127.8 bits entropy (Very Strong)
-✓ list      - Formatted table output
-✓ status    - Shows vault info
-✓ lock      - Session destroyed
+✓ init        - Vault created
+✓ unlock      - Session created (15 min)
+✓ add         - Entries added with tags
+✓ generate    - 127.8 bits entropy (Very Strong)
+✓ list        - Formatted table output
+✓ status      - Shows vault info
+✓ tui         - Full terminal UI working
+✓ lock        - Session destroyed
 ✓ completions - bash/zsh/fish working
 ```
 
