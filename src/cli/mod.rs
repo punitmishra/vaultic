@@ -1245,8 +1245,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Tui => {
+            let vault_path = default_vault_path(&cli.vault);
             Output::info("Starting TUI mode...");
-            crate::tui::run()?;
+            crate::tui::run_with_vault(Some(&vault_path))?;
             Ok(())
         }
 
