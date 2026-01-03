@@ -214,6 +214,47 @@ Fully implemented with:
 
 ---
 
+## Nix Development Environment
+
+The project includes Nix flake configuration for reproducible builds with all dependencies.
+
+### Quick Start with Nix
+
+```bash
+# Enter development shell (includes all deps for FIDO2 + GPG)
+nix develop
+
+# Or use minimal shell (no FIDO2/GPG deps)
+nix develop .#minimal
+
+# Build with Nix
+nix build              # Full build with all features
+nix build .#minimal    # Minimal build
+
+# With direnv (auto-activates on cd)
+direnv allow
+```
+
+### Without Nix (Manual Dependencies)
+
+For building without optional features, no extra deps needed:
+```bash
+cargo build --release
+```
+
+For optional features:
+- **GPG support**: `apt install nettle-dev libgmp-dev` (or equivalent)
+- **FIDO2 support**: `apt install libudev-dev` (or equivalent)
+
+```bash
+# Build with optional features
+cargo build --release --features gpg
+cargo build --release --features fido2
+cargo build --release --all-features
+```
+
+---
+
 ## Development Commands
 
 ```bash
