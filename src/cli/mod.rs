@@ -119,6 +119,14 @@ pub enum Commands {
         /// Mark as favorite
         #[arg(long)]
         favorite: bool,
+
+        /// Custom field (format: key=value, can be used multiple times)
+        #[arg(long = "field", value_name = "KEY=VALUE")]
+        fields: Vec<String>,
+
+        /// Notes
+        #[arg(short, long)]
+        notes: Option<String>,
     },
 
     /// Get/show an entry
@@ -306,6 +314,20 @@ pub enum Commands {
         check_breaches: bool,
     },
 
+    /// View password history for an entry
+    History {
+        /// Entry name or ID
+        query: String,
+
+        /// Show passwords in plain text
+        #[arg(short, long)]
+        show: bool,
+
+        /// Restore password from history by index (1-based)
+        #[arg(short, long)]
+        restore: Option<usize>,
+    },
+
     /// Open interactive TUI mode
     Tui,
 
@@ -324,6 +346,102 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+
+    /// Batch operations on multiple entries
+    Batch {
+        #[command(subcommand)]
+        command: BatchCommands,
+    },
+
+    /// Git credential helper (use with git config credential.helper)
+    #[command(name = "credential")]
+    Credential {
+        #[command(subcommand)]
+        command: CredentialCommands,
+    },
+}
+
+/// Batch operation subcommands
+#[derive(Subcommand)]
+pub enum BatchCommands {
+    /// Add tags to matching entries
+    Tag {
+        /// Filter by name (fuzzy match)
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Filter by folder
+        #[arg(long)]
+        folder: Option<String>,
+
+        /// Tags to add (comma-separated)
+        #[arg(long)]
+        add: Option<String>,
+
+        /// Tags to remove (comma-separated)
+        #[arg(long)]
+        remove: Option<String>,
+    },
+
+    /// Delete matching entries
+    Delete {
+        /// Filter by name (fuzzy match)
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Filter by tags (comma-separated)
+        #[arg(long)]
+        tags: Option<String>,
+
+        /// Filter by folder
+        #[arg(long)]
+        folder: Option<String>,
+
+        /// Skip confirmation
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// Move entries to a folder
+    Move {
+        /// Filter by name (fuzzy match)
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Filter by tags (comma-separated)
+        #[arg(long)]
+        tags: Option<String>,
+
+        /// Target folder
+        #[arg(long)]
+        to: String,
+    },
+
+    /// Mark/unmark entries as favorites
+    Favorite {
+        /// Filter by name (fuzzy match)
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Filter by folder
+        #[arg(long)]
+        folder: Option<String>,
+
+        /// Set favorite status (true/false)
+        #[arg(long)]
+        set: bool,
+    },
+}
+
+/// Git credential helper subcommands
+#[derive(Subcommand)]
+pub enum CredentialCommands {
+    /// Get credentials for a URL
+    Get,
+    /// Store credentials for a URL
+    Store,
+    /// Erase credentials for a URL
+    Erase,
 }
 
 #[derive(Subcommand)]
@@ -955,7 +1073,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Add { name, r#type, username, password, generate, length, url, tags, folder, favorite } => {
+        Commands::Add { name, r#type, username, password, generate, length, url, tags, folder, favorite, fields, notes } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
             let (vault_path, master_key) = session_mgr.load()
@@ -1008,6 +1126,24 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             entry.folder = folder;
             entry.favorite = favorite;
 
+            // Add notes
+            if let Some(n) = notes {
+                entry.notes = Some(crate::models::SensitiveString::new(n));
+            }
+
+            // Parse and add custom fields
+            for field_str in fields {
+                if let Some((key, value)) = field_str.split_once('=') {
+                    entry.custom_fields.push(crate::models::CustomField {
+                        name: key.trim().to_string(),
+                        value: crate::models::SensitiveString::new(value.trim()),
+                        is_hidden: true, // Default to hidden for security
+                    });
+                } else {
+                    Output::warning(&format!("Invalid field format '{}', expected key=value", field_str));
+                }
+            }
+
             // Save to vault
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
             storage.unlock(&master_key)?;
@@ -1019,6 +1155,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(u) = &url {
                 Output::field("URL", u);
+            }
+            if !entry.custom_fields.is_empty() {
+                Output::field("Custom fields", &entry.custom_fields.len().to_string());
             }
             Ok(())
         }
@@ -1427,6 +1566,72 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
+        Commands::History { query, show, restore } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr.load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Find entry
+            let entries = storage.list_entries()?;
+            let entry = entries.iter()
+                .find(|e| e.name.to_lowercase().contains(&query.to_lowercase()) || e.id.to_string() == query)
+                .ok_or_else(|| format!("Entry '{}' not found", query))?;
+
+            let history = entry.get_password_history();
+
+            if let Some(index) = restore {
+                if index == 0 || index > history.len() {
+                    return Err(format!("Invalid history index. Available: 1-{}", history.len()).into());
+                }
+
+                // Get a mutable copy
+                let mut entry_clone = entry.clone();
+                entry_clone.restore_password(index - 1);
+                storage.update_entry(&entry_clone)?;
+
+                Output::success(&format!("Restored password #{} for '{}'", index, entry.name));
+                return Ok(());
+            }
+
+            if history.is_empty() {
+                Output::info(&format!("No password history for '{}'", entry.name));
+                return Ok(());
+            }
+
+            println!();
+            Output::header(&format!("Password History: {}", entry.name));
+            println!();
+
+            for (i, hist) in history.iter().enumerate() {
+                let age = chrono::Utc::now() - hist.changed_at;
+                let age_str = if age.num_days() > 0 {
+                    format!("{} days ago", age.num_days())
+                } else if age.num_hours() > 0 {
+                    format!("{} hours ago", age.num_hours())
+                } else {
+                    format!("{} minutes ago", age.num_minutes())
+                };
+
+                if show {
+                    println!("  {}. {} ({})", i + 1, hist.password.expose(), age_str);
+                } else {
+                    let masked = "*".repeat(hist.password.len().min(12));
+                    println!("  {}. {} ({} chars, {})", i + 1, masked, hist.password.len(), age_str);
+                }
+            }
+
+            println!();
+            if !show {
+                Output::info("Use --show to reveal passwords");
+            }
+            Output::info("Use --restore <N> to restore a password from history");
+
+            Ok(())
+        }
+
         Commands::Tui => {
             let vault_path = default_vault_path(&cli.vault);
             Output::info("Starting TUI mode...");
@@ -1456,12 +1661,404 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             generate(shell, &mut cmd, name, &mut io::stdout());
             Ok(())
         }
+
+        Commands::Batch { command } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr.load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            let all_entries = storage.list_entries()?;
+
+            match command {
+                BatchCommands::Tag { filter, folder, add, remove } => {
+                    // Filter entries
+                    let matches: Vec<_> = all_entries.iter()
+                        .filter(|e| {
+                            let name_match = filter.as_ref()
+                                .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
+                                .unwrap_or(true);
+                            let folder_match = folder.as_ref()
+                                .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
+                                .unwrap_or(true);
+                            name_match && folder_match
+                        })
+                        .collect();
+
+                    if matches.is_empty() {
+                        Output::warning("No entries match the filter");
+                        return Ok(());
+                    }
+
+                    let add_tags: Vec<String> = add
+                        .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                        .unwrap_or_default();
+                    let remove_tags: Vec<String> = remove
+                        .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                        .unwrap_or_default();
+
+                    let mut updated = 0;
+                    for entry in matches {
+                        let mut entry_clone = entry.clone();
+                        let mut changed = false;
+
+                        for tag in &add_tags {
+                            if !entry_clone.tags.contains(tag) {
+                                entry_clone.tags.push(tag.clone());
+                                changed = true;
+                            }
+                        }
+
+                        for tag in &remove_tags {
+                            if let Some(pos) = entry_clone.tags.iter().position(|t| t == tag) {
+                                entry_clone.tags.remove(pos);
+                                changed = true;
+                            }
+                        }
+
+                        if changed {
+                            entry_clone.updated_at = chrono::Utc::now();
+                            storage.update_entry(&entry_clone)?;
+                            updated += 1;
+                        }
+                    }
+
+                    Output::success(&format!("Updated tags on {} entries", updated));
+                    Ok(())
+                }
+
+                BatchCommands::Delete { filter, tags, folder, yes } => {
+                    let tag_list: Vec<String> = tags
+                        .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                        .unwrap_or_default();
+
+                    let matches: Vec<_> = all_entries.iter()
+                        .filter(|e| {
+                            let name_match = filter.as_ref()
+                                .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
+                                .unwrap_or(true);
+                            let folder_match = folder.as_ref()
+                                .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
+                                .unwrap_or(true);
+                            let tag_match = if tag_list.is_empty() {
+                                true
+                            } else {
+                                tag_list.iter().any(|t| e.tags.contains(t))
+                            };
+                            name_match && folder_match && tag_match
+                        })
+                        .collect();
+
+                    if matches.is_empty() {
+                        Output::warning("No entries match the filter");
+                        return Ok(());
+                    }
+
+                    println!("Entries to delete:");
+                    for entry in &matches {
+                        println!("  • {} ({})", entry.name, entry.id);
+                    }
+                    println!();
+
+                    if !yes {
+                        let confirm = Prompts::confirm(&format!(
+                            "Delete {} entries? This cannot be undone", matches.len()
+                        ), false)?;
+                        if !confirm {
+                            Output::info("Cancelled");
+                            return Ok(());
+                        }
+                    }
+
+                    for entry in &matches {
+                        storage.delete_entry(&entry.id)?;
+                    }
+
+                    Output::success(&format!("Deleted {} entries", matches.len()));
+                    Ok(())
+                }
+
+                BatchCommands::Move { filter, tags, to } => {
+                    let tag_list: Vec<String> = tags
+                        .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                        .unwrap_or_default();
+
+                    let matches: Vec<_> = all_entries.iter()
+                        .filter(|e| {
+                            let name_match = filter.as_ref()
+                                .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
+                                .unwrap_or(true);
+                            let tag_match = if tag_list.is_empty() {
+                                true
+                            } else {
+                                tag_list.iter().any(|t| e.tags.contains(t))
+                            };
+                            name_match && tag_match
+                        })
+                        .collect();
+
+                    if matches.is_empty() {
+                        Output::warning("No entries match the filter");
+                        return Ok(());
+                    }
+
+                    for entry in &matches {
+                        let mut entry_clone = (*entry).clone();
+                        entry_clone.folder = Some(to.clone());
+                        entry_clone.updated_at = chrono::Utc::now();
+                        storage.update_entry(&entry_clone)?;
+                    }
+
+                    Output::success(&format!("Moved {} entries to folder '{}'", matches.len(), to));
+                    Ok(())
+                }
+
+                BatchCommands::Favorite { filter, folder, set } => {
+                    let matches: Vec<_> = all_entries.iter()
+                        .filter(|e| {
+                            let name_match = filter.as_ref()
+                                .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
+                                .unwrap_or(true);
+                            let folder_match = folder.as_ref()
+                                .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
+                                .unwrap_or(true);
+                            name_match && folder_match
+                        })
+                        .collect();
+
+                    if matches.is_empty() {
+                        Output::warning("No entries match the filter");
+                        return Ok(());
+                    }
+
+                    let mut updated = 0;
+                    for entry in &matches {
+                        if entry.favorite != set {
+                            let mut entry_clone = (*entry).clone();
+                            entry_clone.favorite = set;
+                            entry_clone.updated_at = chrono::Utc::now();
+                            storage.update_entry(&entry_clone)?;
+                            updated += 1;
+                        }
+                    }
+
+                    let action = if set { "favorited" } else { "unfavorited" };
+                    Output::success(&format!("{} {} entries", action.to_string().chars().next().unwrap().to_uppercase().to_string() + &action[1..], updated));
+                    Ok(())
+                }
+            }
+        }
+
+        Commands::Credential { command } => {
+            // Git credential helper
+            // Used with: git config credential.helper '!vaultic credential'
+            match command {
+                CredentialCommands::Get => {
+                    // Read credential request from stdin
+                    let mut input = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if io::stdin().read_line(&mut line)? == 0 || line.trim().is_empty() {
+                            break;
+                        }
+                        input.push_str(&line);
+                    }
+
+                    // Parse the input
+                    let mut protocol = String::new();
+                    let mut host = String::new();
+                    let mut path = String::new();
+
+                    for line in input.lines() {
+                        if let Some((key, value)) = line.split_once('=') {
+                            match key {
+                                "protocol" => protocol = value.to_string(),
+                                "host" => host = value.to_string(),
+                                "path" => path = value.to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    if host.is_empty() {
+                        return Ok(()); // No host, nothing to do
+                    }
+
+                    // Look for matching entry
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vault_path, master_key) = session_mgr.load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+                    let entries = storage.list_entries()?;
+
+                    // Search for entries matching the host
+                    let url_to_match = if path.is_empty() {
+                        format!("{}://{}", protocol, host)
+                    } else {
+                        format!("{}://{}/{}", protocol, host, path)
+                    };
+
+                    // Find best match - first try exact URL match, then host match
+                    let matching_entry = entries.iter()
+                        .filter(|e| e.url.is_some() && e.username.is_some() && e.password.is_some())
+                        .find(|e| {
+                            let entry_url = e.url.as_ref().unwrap().to_lowercase();
+                            entry_url.contains(&host.to_lowercase())
+                        });
+
+                    if let Some(entry) = matching_entry {
+                        if let (Some(username), Some(password)) = (&entry.username, &entry.password) {
+                            println!("username={}", username);
+                            println!("password={}", password.expose());
+                        }
+                    }
+
+                    Ok(())
+                }
+
+                CredentialCommands::Store => {
+                    // Read credential data from stdin
+                    let mut input = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if io::stdin().read_line(&mut line)? == 0 || line.trim().is_empty() {
+                            break;
+                        }
+                        input.push_str(&line);
+                    }
+
+                    // Parse the input
+                    let mut protocol = String::new();
+                    let mut host = String::new();
+                    let mut username = String::new();
+                    let mut password = String::new();
+                    let mut path = String::new();
+
+                    for line in input.lines() {
+                        if let Some((key, value)) = line.split_once('=') {
+                            match key {
+                                "protocol" => protocol = value.to_string(),
+                                "host" => host = value.to_string(),
+                                "username" => username = value.to_string(),
+                                "password" => password = value.to_string(),
+                                "path" => path = value.to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    if host.is_empty() || username.is_empty() || password.is_empty() {
+                        return Ok(()); // Not enough info
+                    }
+
+                    // Check if entry already exists
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vault_path, master_key) = session_mgr.load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+                    let entries = storage.list_entries()?;
+
+                    let url = if path.is_empty() {
+                        format!("{}://{}", protocol, host)
+                    } else {
+                        format!("{}://{}/{}", protocol, host, path)
+                    };
+
+                    let existing = entries.iter().find(|e| {
+                        e.url.as_ref().map(|u| u.to_lowercase().contains(&host.to_lowercase())).unwrap_or(false) &&
+                        e.username.as_ref().map(|u| u == &username).unwrap_or(false)
+                    });
+
+                    if let Some(entry) = existing {
+                        // Update existing entry
+                        let mut updated = entry.clone();
+                        updated.set_password(password);
+                        storage.update_entry(&updated)?;
+                    } else {
+                        // Create new entry
+                        let entry_name = format!("git:{}", host);
+                        let entry = VaultEntry::new(&entry_name, EntryType::Password)
+                            .with_username(&username)
+                            .with_password(password)
+                            .with_url(&url)
+                            .with_tags(vec!["git".to_string()]);
+                        storage.add_entry(&entry)?;
+                    }
+
+                    Ok(())
+                }
+
+                CredentialCommands::Erase => {
+                    // Read credential data from stdin
+                    let mut input = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if io::stdin().read_line(&mut line)? == 0 || line.trim().is_empty() {
+                            break;
+                        }
+                        input.push_str(&line);
+                    }
+
+                    // Parse the input
+                    let mut host = String::new();
+                    let mut username = String::new();
+
+                    for line in input.lines() {
+                        if let Some((key, value)) = line.split_once('=') {
+                            match key {
+                                "host" => host = value.to_string(),
+                                "username" => username = value.to_string(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    if host.is_empty() {
+                        return Ok(());
+                    }
+
+                    // Find and delete matching entry
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vault_path, master_key) = session_mgr.load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+                    let entries = storage.list_entries()?;
+
+                    let matching_entry = entries.iter().find(|e| {
+                        let url_match = e.url.as_ref()
+                            .map(|u| u.to_lowercase().contains(&host.to_lowercase()))
+                            .unwrap_or(false);
+                        let user_match = if username.is_empty() {
+                            true
+                        } else {
+                            e.username.as_ref().map(|u| u == &username).unwrap_or(false)
+                        };
+                        url_match && user_match
+                    });
+
+                    if let Some(entry) = matching_entry {
+                        storage.delete_entry(&entry.id)?;
+                    }
+
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn test_entry_row_conversion() {
@@ -1472,5 +2069,113 @@ mod tests {
         let row = EntryRow::from(&entry);
         assert_eq!(row.name, "Test");
         assert_eq!(row.username, "user@test.com");
+    }
+
+    #[test]
+    fn test_cli_add_with_fields() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "add", "MyEntry",
+            "--username", "user@example.com",
+            "--password", "secret",
+            "--field", "key1=value1",
+            "--field", "key2=value2",
+            "--notes", "Some notes",
+            "--favorite",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Add { name, fields, notes, favorite, .. } => {
+                assert_eq!(name, "MyEntry");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0], "key1=value1");
+                assert_eq!(fields[1], "key2=value2");
+                assert_eq!(notes, Some("Some notes".to_string()));
+                assert!(favorite);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_batch_delete() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "batch", "delete",
+            "--filter", "test",
+            "--tags", "old,unused",
+            "--yes",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Batch { command: BatchCommands::Delete { filter, tags, yes, .. } } => {
+                assert_eq!(filter, Some("test".to_string()));
+                assert_eq!(tags, Some("old,unused".to_string()));
+                assert!(yes);
+            }
+            _ => panic!("Expected Batch Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_batch_move() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "batch", "move",
+            "--filter", "github",
+            "--to", "work/development",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Batch { command: BatchCommands::Move { filter, to, .. } } => {
+                assert_eq!(filter, Some("github".to_string()));
+                assert_eq!(to, "work/development");
+            }
+            _ => panic!("Expected Batch Move command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_credential_get() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "credential", "get",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Credential { command: CredentialCommands::Get } => {}
+            _ => panic!("Expected Credential Get command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_credential_store() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "credential", "store",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::Credential { command: CredentialCommands::Store } => {}
+            _ => panic!("Expected Credential Store command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_history() {
+        let cli = Cli::try_parse_from(&[
+            "vaultic",
+            "history", "github",
+            "--show",
+        ]).unwrap();
+
+        match cli.command {
+            Commands::History { query, show, restore } => {
+                assert_eq!(query, "github");
+                assert!(show);
+                assert_eq!(restore, None);
+            }
+            _ => panic!("Expected History command"),
+        }
     }
 }

@@ -116,6 +116,13 @@ pub struct CustomField {
     pub is_hidden: bool,
 }
 
+/// A historical password entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordHistoryEntry {
+    pub password: SensitiveString,
+    pub changed_at: DateTime<Utc>,
+}
+
 /// A password/secret entry in the vault
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultEntry {
@@ -140,7 +147,13 @@ pub struct VaultEntry {
     pub rotation_days: Option<u32>,
     /// Shared with these user IDs (public key fingerprints)
     pub shared_with: Vec<String>,
+    /// Password history (last N passwords)
+    #[serde(default)]
+    pub password_history: Vec<PasswordHistoryEntry>,
 }
+
+/// Maximum number of passwords to keep in history
+pub const MAX_PASSWORD_HISTORY: usize = 5;
 
 impl VaultEntry {
     pub fn new(name: impl Into<String>, entry_type: EntryType) -> Self {
@@ -165,6 +178,7 @@ impl VaultEntry {
             favorite: false,
             rotation_days: Some(90), // Default 90-day rotation
             shared_with: Vec::new(),
+            password_history: Vec::new(),
         }
     }
 
@@ -172,6 +186,57 @@ impl VaultEntry {
         self.password = Some(password.into());
         self.password_changed_at = Some(Utc::now());
         self
+    }
+
+    /// Set a new password, saving the old one to history
+    pub fn set_password(&mut self, new_password: impl Into<SensitiveString>) {
+        let now = Utc::now();
+
+        // Save current password to history if it exists
+        if let Some(old_password) = self.password.take() {
+            let history_entry = PasswordHistoryEntry {
+                password: old_password,
+                changed_at: self.password_changed_at.unwrap_or(self.created_at),
+            };
+            self.password_history.insert(0, history_entry);
+
+            // Keep only last N passwords
+            self.password_history.truncate(MAX_PASSWORD_HISTORY);
+        }
+
+        self.password = Some(new_password.into());
+        self.password_changed_at = Some(now);
+        self.updated_at = now;
+    }
+
+    /// Get password history
+    pub fn get_password_history(&self) -> &[PasswordHistoryEntry] {
+        &self.password_history
+    }
+
+    /// Restore a password from history by index
+    pub fn restore_password(&mut self, index: usize) -> Option<()> {
+        if index >= self.password_history.len() {
+            return None;
+        }
+
+        let history_entry = self.password_history.remove(index);
+
+        // Save current password to history
+        if let Some(current) = self.password.take() {
+            let current_entry = PasswordHistoryEntry {
+                password: current,
+                changed_at: self.password_changed_at.unwrap_or(self.created_at),
+            };
+            self.password_history.insert(0, current_entry);
+            self.password_history.truncate(MAX_PASSWORD_HISTORY);
+        }
+
+        self.password = Some(history_entry.password);
+        self.password_changed_at = Some(Utc::now());
+        self.updated_at = Utc::now();
+
+        Some(())
     }
 
     pub fn with_username(mut self, username: impl Into<String>) -> Self {
@@ -422,5 +487,93 @@ mod tests {
         entry.rotation_days = Some(1);
         entry.password_changed_at = Some(Utc::now() - chrono::Duration::days(2));
         assert!(entry.needs_rotation());
+    }
+
+    #[test]
+    fn test_password_history() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password)
+            .with_password("password1");
+
+        // Change password - should save old one to history
+        entry.set_password("password2");
+        assert_eq!(entry.password.as_ref().unwrap().expose(), "password2");
+        assert_eq!(entry.password_history.len(), 1);
+        assert_eq!(entry.password_history[0].password.expose(), "password1");
+
+        // Change again
+        entry.set_password("password3");
+        assert_eq!(entry.password.as_ref().unwrap().expose(), "password3");
+        assert_eq!(entry.password_history.len(), 2);
+        assert_eq!(entry.password_history[0].password.expose(), "password2");
+        assert_eq!(entry.password_history[1].password.expose(), "password1");
+    }
+
+    #[test]
+    fn test_password_history_limit() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password)
+            .with_password("password0");
+
+        // Add more than MAX_PASSWORD_HISTORY passwords
+        for i in 1..=7 {
+            entry.set_password(format!("password{}", i));
+        }
+
+        // Should only keep MAX_PASSWORD_HISTORY (5) entries
+        assert_eq!(entry.password_history.len(), MAX_PASSWORD_HISTORY);
+        assert_eq!(entry.password.as_ref().unwrap().expose(), "password7");
+    }
+
+    #[test]
+    fn test_password_restore() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password)
+            .with_password("old_password");
+        entry.set_password("new_password");
+
+        // Restore old password
+        assert!(entry.restore_password(0).is_some());
+        assert_eq!(entry.password.as_ref().unwrap().expose(), "old_password");
+
+        // Current should now be in history
+        assert_eq!(entry.password_history[0].password.expose(), "new_password");
+    }
+
+    #[test]
+    fn test_custom_fields() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password);
+
+        // Add custom fields
+        entry.custom_fields.push(CustomField {
+            name: "security_question".to_string(),
+            value: SensitiveString::new("What is your pet's name?"),
+            is_hidden: false,
+        });
+        entry.custom_fields.push(CustomField {
+            name: "security_answer".to_string(),
+            value: SensitiveString::new("Fluffy"),
+            is_hidden: true,
+        });
+
+        assert_eq!(entry.custom_fields.len(), 2);
+        assert_eq!(entry.custom_fields[0].name, "security_question");
+        assert!(!entry.custom_fields[0].is_hidden);
+        assert!(entry.custom_fields[1].is_hidden);
+    }
+
+    #[test]
+    fn test_entry_with_notes() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password);
+        entry.notes = Some(SensitiveString::new("This is a secure note"));
+
+        assert!(entry.notes.is_some());
+        assert_eq!(entry.notes.as_ref().unwrap().expose(), "This is a secure note");
+    }
+
+    #[test]
+    fn test_favorite_flag() {
+        let mut entry = VaultEntry::new("Test", EntryType::Password);
+        assert!(!entry.favorite);
+
+        entry.favorite = true;
+        assert!(entry.favorite);
     }
 }

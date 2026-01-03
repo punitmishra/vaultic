@@ -119,7 +119,7 @@ vaultic tui
 | `unlock` | ✅ WORKING | Password + session creation |
 | `lock` | ✅ WORKING | Secure session destruction |
 | `status` | ✅ WORKING | Shows vault/session info |
-| `add` | ✅ WORKING | Full entry creation with tags, favorites |
+| `add` | ✅ WORKING | Full entry creation with tags, favorites, custom fields, notes |
 | `list` | ✅ WORKING | Filters by tags, folder, favorites |
 | `generate` | ✅ WORKING | Password gen with entropy |
 | `get` | ✅ WORKING | Entry retrieval |
@@ -133,6 +133,9 @@ vaultic tui
 | `check` | ✅ WORKING | HIBP breach checking |
 | `analyze` | ✅ WORKING | AI password analysis |
 | `health` | ✅ WORKING | Security audit with health score |
+| `history` | ✅ WORKING | Password history tracking and restore |
+| `batch` | ✅ WORKING | Batch operations (tag, delete, move, favorite) |
+| `credential` | ✅ WORKING | Git credential helper integration |
 | `share` | ⚠️ STUB | Identity management needed |
 | `suggest` | ⚠️ STUB | AI suggestions needed |
 
@@ -141,17 +144,20 @@ vaultic tui
 ## Test Results (Latest)
 
 ```
-cargo test: 72 tests passing (37 lib + 35 bin)
+cargo test: 47 tests passing
 cargo build --release: Success
 
 Local workflow test:
 ✓ init       - Vault created
 ✓ unlock     - Session created (15 min)
-✓ add        - Entries added with tags
+✓ add        - Entries added with tags, custom fields, notes
 ✓ generate   - Strong password with entropy
 ✓ list       - Formatted table output
 ✓ status     - Shows vault info
 ✓ health     - Security audit report
+✓ history    - Password history and restore
+✓ batch      - Batch operations on entries
+✓ credential - Git credential helper
 ✓ tui        - Full terminal UI working
 ✓ lock       - Session destroyed
 ✓ completions - bash/zsh/fish working
