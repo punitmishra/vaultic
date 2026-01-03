@@ -36,12 +36,12 @@ rand_core = "0.6"
 zeroize = { version = "1.8", features = ["derive"] }
 secrecy = { version = "0.10", features = ["serde"] }
 
-# FIDO2/WebAuthn (YubiKey support)
-ctap-hid-fido2 = "3.5"
+# FIDO2/WebAuthn (YubiKey support) - optional, requires libudev-dev
+ctap-hid-fido2 = { version = "3.5", optional = true }
 # authenticator = "0.4"  # Alternative FIDO2 crate
 
-# GPG Support
-sequoia-openpgp = "1.21"
+# GPG Support (optional - requires nettle-dev system package)
+sequoia-openpgp = { version = "1.21", optional = true }
 
 # Storage
 sled = "0.34"
@@ -66,7 +66,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.22"
 url = "2.5"
-clipboard = "0.5"
+arboard = "3.4"
 toml = "0.8"
 fuzzy-matcher = "0.3"
 passwords = "3.1"
@@ -87,11 +87,11 @@ criterion = "0.5"
 proptest = "1.5"
 
 [features]
-default = ["fido2", "ai-local"]
-fido2 = []
+default = ["ai-local"]
+fido2 = ["dep:ctap-hid-fido2"]
 ai-local = []
 ai-cloud = []
-gpg = []
+gpg = ["dep:sequoia-openpgp"]
 
 [[bin]]
 name = "vaultic"

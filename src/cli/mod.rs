@@ -697,9 +697,8 @@ pub fn generate_and_display_password(
 
 /// Internal clipboard helper
 fn copy_to_clipboard_internal(text: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use clipboard::ClipboardProvider;
-    let mut ctx: clipboard::ClipboardContext = clipboard::ClipboardProvider::new()?;
-    ctx.set_contents(text.to_string())?;
+    let mut clipboard = arboard::Clipboard::new()?;
+    clipboard.set_text(text)?;
     Ok(())
 }
 
@@ -717,12 +716,11 @@ pub fn copy_to_clipboard(text: &str, clear_seconds: u64) -> io::Result<()> {
     let clear_text = text.to_string();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(clear_seconds));
-        if let Ok(mut ctx) = clipboard::ClipboardProvider::new() as Result<clipboard::ClipboardContext, _> {
-            use clipboard::ClipboardProvider;
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
             // Only clear if content hasn't changed
-            if let Ok(current) = ctx.get_contents() {
+            if let Ok(current) = clipboard.get_text() {
                 if current == clear_text {
-                    let _ = ctx.set_contents(String::new());
+                    let _ = clipboard.set_text(String::new());
                 }
             }
         }

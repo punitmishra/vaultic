@@ -14,7 +14,9 @@ mod ai;
 mod cli;
 mod crypto;
 mod export;
+#[cfg(feature = "fido2")]
 mod fido2;
+#[cfg(feature = "gpg")]
 mod gpg;
 mod import;
 mod models;

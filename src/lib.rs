@@ -45,7 +45,9 @@ pub mod ai;
 pub mod cli;
 pub mod crypto;
 pub mod export;
+#[cfg(feature = "fido2")]
 pub mod fido2;
+#[cfg(feature = "gpg")]
 pub mod gpg;
 pub mod import;
 pub mod models;
@@ -198,6 +200,7 @@ pub enum VaulticError {
     Crypto(#[from] crypto::CryptoError),
 
     /// FIDO2 errors
+    #[cfg(feature = "fido2")]
     #[error("FIDO2 error: {0}")]
     Fido2(#[from] fido2::Fido2Error),
 
@@ -206,6 +209,7 @@ pub enum VaulticError {
     Sharing(#[from] sharing::SharingError),
 
     /// GPG errors
+    #[cfg(feature = "gpg")]
     #[error("GPG error: {0}")]
     Gpg(#[from] gpg::GpgError),
 

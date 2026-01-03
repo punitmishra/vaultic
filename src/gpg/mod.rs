@@ -2,6 +2,8 @@
 //!
 //! Allows using existing GPG keys for vault encryption and identity.
 //! Uses the Sequoia PGP library for OpenPGP operations.
+//!
+//! This module is only compiled when the `gpg` feature is enabled.
 
 use std::io::Write;
 use std::path::Path;

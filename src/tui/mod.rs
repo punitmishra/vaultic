@@ -203,12 +203,9 @@ impl App {
     pub fn copy_password(&mut self) -> TuiResult<()> {
         if let Some(entry) = self.selected_entry() {
             if let Some(password) = &entry.password {
-                use clipboard::ClipboardProvider;
-                use clipboard::ClipboardContext;
-
-                let mut ctx: ClipboardContext = ClipboardProvider::new()
+                let mut clipboard = arboard::Clipboard::new()
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
-                ctx.set_contents(password.expose().to_string())
+                clipboard.set_text(password.expose().to_string())
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
 
                 self.status_message = Some(format!("Password for '{}' copied to clipboard", entry.name));
