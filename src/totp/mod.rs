@@ -36,7 +36,7 @@ pub enum Algorithm {
 
 impl Algorithm {
     /// Parse algorithm from string
-    pub fn from_str(s: &str) -> TotpResult<Self> {
+    pub fn parse(s: &str) -> TotpResult<Self> {
         match s.to_uppercase().as_str() {
             "SHA1" => Ok(Self::Sha1),
             "SHA256" => Ok(Self::Sha256),
@@ -139,26 +139,20 @@ impl Totp {
 
         let hash = match self.algorithm {
             Algorithm::Sha1 => {
-                let mut mac =
-                    Hmac::<Sha1>::new_from_slice(&self.secret).map_err(|_| {
-                        TotpError::InvalidSecret("Invalid key length".to_string())
-                    })?;
+                let mut mac = Hmac::<Sha1>::new_from_slice(&self.secret)
+                    .map_err(|_| TotpError::InvalidSecret("Invalid key length".to_string()))?;
                 mac.update(&counter_bytes);
                 mac.finalize().into_bytes().to_vec()
             }
             Algorithm::Sha256 => {
-                let mut mac =
-                    Hmac::<Sha256>::new_from_slice(&self.secret).map_err(|_| {
-                        TotpError::InvalidSecret("Invalid key length".to_string())
-                    })?;
+                let mut mac = Hmac::<Sha256>::new_from_slice(&self.secret)
+                    .map_err(|_| TotpError::InvalidSecret("Invalid key length".to_string()))?;
                 mac.update(&counter_bytes);
                 mac.finalize().into_bytes().to_vec()
             }
             Algorithm::Sha512 => {
-                let mut mac =
-                    Hmac::<Sha512>::new_from_slice(&self.secret).map_err(|_| {
-                        TotpError::InvalidSecret("Invalid key length".to_string())
-                    })?;
+                let mut mac = Hmac::<Sha512>::new_from_slice(&self.secret)
+                    .map_err(|_| TotpError::InvalidSecret("Invalid key length".to_string()))?;
                 mac.update(&counter_bytes);
                 mac.finalize().into_bytes().to_vec()
             }
@@ -222,7 +216,11 @@ impl Totp {
 
         let label = match (&self.issuer, &self.account) {
             (Some(issuer), Some(account)) => {
-                format!("{}:{}", urlencoding::encode(issuer), urlencoding::encode(account))
+                format!(
+                    "{}:{}",
+                    urlencoding::encode(issuer),
+                    urlencoding::encode(account)
+                )
             }
             (None, Some(account)) => urlencoding::encode(account).to_string(),
             (Some(issuer), None) => urlencoding::encode(issuer).to_string(),
@@ -278,19 +276,20 @@ impl Totp {
                         .parse()
                         .map_err(|_| TotpError::InvalidSecret("Invalid period".to_string()))?
                 }
-                "algorithm" => algorithm = Algorithm::from_str(&value)?,
+                "algorithm" => algorithm = Algorithm::parse(&value)?,
                 "issuer" => issuer = Some(value.to_string()),
                 _ => {}
             }
         }
 
-        let secret = secret.ok_or_else(|| TotpError::InvalidSecret("Missing secret".to_string()))?;
+        let secret =
+            secret.ok_or_else(|| TotpError::InvalidSecret("Missing secret".to_string()))?;
         let decoded = decode_base32(&secret)?;
 
         // Extract account from path
         let path = url.path().trim_start_matches('/');
         let account = if path.contains(':') {
-            path.split(':').last().map(|s| s.to_string())
+            path.split(':').next_back().map(|s| s.to_string())
         } else if !path.is_empty() {
             Some(path.to_string())
         } else {
@@ -356,7 +355,7 @@ fn decode_base32(input: &str) -> TotpResult<Vec<u8>> {
 fn encode_base32(input: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-    let mut output = String::with_capacity((input.len() * 8 + 4) / 5);
+    let mut output = String::with_capacity((input.len() * 8).div_ceil(5));
     let mut buffer: u64 = 0;
     let mut bits = 0;
 
@@ -452,9 +451,7 @@ mod tests {
     fn test_totp_sha256() {
         // SHA256 test secret (32 bytes)
         let secret = encode_base32(b"12345678901234567890123456789012");
-        let totp = Totp::new(&secret)
-            .unwrap()
-            .algorithm(Algorithm::Sha256);
+        let totp = Totp::new(&secret).unwrap().algorithm(Algorithm::Sha256);
 
         // Just verify it generates a 6-digit code
         let code = totp.generate_at(59).unwrap();

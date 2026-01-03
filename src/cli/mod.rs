@@ -1,5 +1,5 @@
 //! Beautiful CLI interface for Vaultic
-//! 
+//!
 //! Features:
 //! - Fuzzy search
 //! - Interactive TUI mode
@@ -7,20 +7,18 @@
 //! - Clipboard integration
 //! - QR code generation for sharing
 
-use std::io::{self, Write};
+use std::io;
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
-use console::{style, Term};
 use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, Password, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use tabled::{settings::Style, Table, Tabled};
-use uuid::Uuid;
 
 use crate::crypto::{PasswordAnalyzer, PasswordGenerator};
-use crate::models::{EntryType, PasswordStrength, SearchFilter, SensitiveString, VaultEntry};
+use crate::models::{EntryType, PasswordStrength, VaultEntry};
 
 /// Vaultic - Secure, local-first password manager
 #[derive(Parser)]
@@ -595,13 +593,13 @@ impl Prompts {
         let password = Password::with_theme(&theme)
             .with_prompt("Master password")
             .interact()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         if confirm {
             let confirm_pwd = Password::with_theme(&theme)
                 .with_prompt("Confirm password")
                 .interact()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| io::Error::other(e.to_string()))?;
 
             if password != confirm_pwd {
                 return Err(io::Error::new(
@@ -629,7 +627,7 @@ impl Prompts {
             .items(&items)
             .default(0)
             .interact()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     /// Confirm an action
@@ -638,21 +636,21 @@ impl Prompts {
             .with_prompt(prompt)
             .default(default)
             .interact()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     /// Get text input
     pub fn input(prompt: &str, default: Option<&str>) -> io::Result<String> {
         let theme = ColorfulTheme::default();
-        let mut input = Input::with_theme(&theme)
-            .with_prompt(prompt);
+        let mut input = Input::with_theme(&theme).with_prompt(prompt);
 
         if let Some(d) = default {
             input = input.default(d.to_string());
         }
 
-        input.interact_text()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+        input
+            .interact_text()
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     /// Get password input (hidden)
@@ -661,7 +659,7 @@ impl Prompts {
             .with_prompt(prompt)
             .allow_empty_password(true)
             .interact()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 
     /// Select from options
@@ -671,7 +669,7 @@ impl Prompts {
             .items(options)
             .default(default)
             .interact()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -776,17 +774,29 @@ pub fn display_entry(entry: &VaultEntry, show_password: bool) {
 
     if let Some(days) = entry.days_until_rotation() {
         if days <= 0 {
-            Output::field("Rotation", &format!("{} days overdue!", -days).red().to_string());
+            Output::field(
+                "Rotation",
+                &format!("{} days overdue!", -days).red().to_string(),
+            );
         } else {
             Output::field("Rotation", &format!("in {} days", days));
         }
     }
 
-    Output::field("Created", &entry.created_at.format("%Y-%m-%d %H:%M").to_string());
-    Output::field("Updated", &entry.updated_at.format("%Y-%m-%d %H:%M").to_string());
+    Output::field(
+        "Created",
+        &entry.created_at.format("%Y-%m-%d %H:%M").to_string(),
+    );
+    Output::field(
+        "Updated",
+        &entry.updated_at.format("%Y-%m-%d %H:%M").to_string(),
+    );
 
     if let Some(accessed) = entry.last_accessed {
-        Output::field("Last accessed", &accessed.format("%Y-%m-%d %H:%M").to_string());
+        Output::field(
+            "Last accessed",
+            &accessed.format("%Y-%m-%d %H:%M").to_string(),
+        );
     }
 
     println!();
@@ -818,10 +828,8 @@ pub fn generate_and_display_password(
     Output::field("Entropy", &format!("{:.1} bits", entropy));
     Output::field("Length", &length.to_string());
 
-    if copy {
-        if copy_to_clipboard_internal(&password).is_ok() {
-            Output::success("Copied to clipboard (clears in 30s)");
-        }
+    if copy && copy_to_clipboard_internal(&password).is_ok() {
+        Output::success("Copied to clipboard (clears in 30s)");
     }
 
     println!();
@@ -837,8 +845,8 @@ fn copy_to_clipboard_internal(text: &str) -> Result<(), Box<dyn std::error::Erro
 
 /// Simple hash for password reuse detection (not cryptographic)
 fn md5_hash(input: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
     input.hash(&mut hasher);
     hasher.finish()
@@ -846,8 +854,7 @@ fn md5_hash(input: &str) -> u64 {
 
 /// Copy to clipboard with auto-clear
 pub fn copy_to_clipboard(text: &str, clear_seconds: u64) -> io::Result<()> {
-    copy_to_clipboard_internal(text)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    copy_to_clipboard_internal(text).map_err(|e| io::Error::other(e.to_string()))?;
 
     Output::success(&format!(
         "Copied to clipboard (clears in {}s)",
@@ -875,8 +882,7 @@ pub fn copy_to_clipboard(text: &str, clear_seconds: u64) -> io::Result<()> {
 pub fn display_qr_code(data: &str) -> io::Result<()> {
     use qrcode::QrCode;
 
-    let code = QrCode::new(data.as_bytes())
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    let code = QrCode::new(data.as_bytes()).map_err(|e| io::Error::other(e.to_string()))?;
 
     let string = code
         .render::<char>()
@@ -913,7 +919,7 @@ pub fn display_status(
     if !is_locked {
         println!();
         Output::header("Health");
-        
+
         if weak_count > 0 {
             Output::warning(&format!("{} weak passwords", weak_count));
         }
@@ -956,7 +962,12 @@ fn default_vault_path(cli_vault: &Option<String>) -> std::path::PathBuf {
 /// Run the CLI command
 pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
-        Commands::Init { name, fido2, high_security, password: cli_password } => {
+        Commands::Init {
+            name,
+            fido2,
+            high_security,
+            password: cli_password,
+        } => {
             Output::info(&format!("Initializing vault '{}'...", name));
             if fido2 {
                 Output::info("FIDO2 hardware key support enabled");
@@ -992,11 +1003,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             use argon2::Argon2;
             let argon2 = Argon2::default();
             let mut key_bytes = [0u8; 32];
-            argon2.hash_password_into(
-                password.as_bytes(),
-                &salt,
-                &mut key_bytes,
-            ).map_err(|e| format!("Key derivation failed: {}", e))?;
+            argon2
+                .hash_password_into(password.as_bytes(), &salt, &mut key_bytes)
+                .map_err(|e| format!("Key derivation failed: {}", e))?;
 
             let master_key = crate::crypto::MasterKey::from_bytes(key_bytes);
 
@@ -1012,7 +1021,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Unlock { timeout, password: cli_password } => {
+        Commands::Unlock {
+            timeout,
+            password: cli_password,
+        } => {
             let session_mgr = crate::session::SessionManager::new()?;
 
             // Check if already unlocked
@@ -1031,7 +1043,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 return Err(format!(
                     "Vault not found at {:?}. Run 'vaultic init' first.",
                     vault_path
-                ).into());
+                )
+                .into());
             }
 
             // Get password (from flag or interactive prompt)
@@ -1047,11 +1060,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             use argon2::Argon2;
             let argon2 = Argon2::default();
             let mut key_bytes = [0u8; 32];
-            argon2.hash_password_into(
-                password.as_bytes(),
-                &kdf_params.salt,
-                &mut key_bytes,
-            ).map_err(|e| format!("Key derivation failed: {}", e))?;
+            argon2
+                .hash_password_into(password.as_bytes(), &kdf_params.salt, &mut key_bytes)
+                .map_err(|e| format!("Key derivation failed: {}", e))?;
 
             let master_key = crate::crypto::MasterKey::from_bytes(key_bytes);
 
@@ -1073,27 +1084,41 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Add { name, r#type, username, password, generate, length, url, tags, folder, favorite, fields, notes } => {
+        Commands::Add {
+            name,
+            r#type,
+            username,
+            password,
+            generate,
+            length,
+            url,
+            tags,
+            folder,
+            favorite,
+            fields,
+            notes,
+        } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
             // Refresh session on activity
             let _ = session_mgr.refresh(15);
 
             let password_value = if generate {
-                let pwd = generate_and_display_password(
-                    length,
-                    true, true, true, true,
-                    false,
-                );
+                let pwd = generate_and_display_password(length, true, true, true, true, false);
                 Some(pwd)
             } else if let Some(p) = password {
                 Some(p)
             } else {
                 let p = Prompts::password("Password (leave empty for none)")?;
-                if p.is_empty() { None } else { Some(p) }
+                if p.is_empty() {
+                    None
+                } else {
+                    Some(p)
+                }
             };
 
             // Convert entry type
@@ -1140,7 +1165,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         is_hidden: true, // Default to hidden for security
                     });
                 } else {
-                    Output::warning(&format!("Invalid field format '{}', expected key=value", field_str));
+                    Output::warning(&format!(
+                        "Invalid field format '{}', expected key=value",
+                        field_str
+                    ));
                 }
             }
 
@@ -1162,16 +1190,31 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Get { query, copy, show, qr, field } => {
+        Commands::Get {
+            query,
+            copy: _,
+            show: _,
+            qr: _,
+            field: _,
+        } => {
             Output::info(&format!("Searching for '{}'...", query));
             Output::warning("Vault operations require unlock - not yet implemented");
             Ok(())
         }
 
-        Commands::List { query, folder, tags, favorites, needs_rotation, weak, limit } => {
+        Commands::List {
+            query,
+            folder,
+            tags,
+            favorites,
+            needs_rotation,
+            weak,
+            limit,
+        } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
             // Refresh session
@@ -1194,7 +1237,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 needs_rotation,
                 weak_passwords: weak,
                 offset: 0,
-                limit: limit.map(|l| l as usize),
+                limit,
             };
 
             let entries = storage.search_entries(&filter)?;
@@ -1205,7 +1248,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Edit { query, interactive } => {
+        Commands::Edit {
+            query,
+            interactive: _,
+        } => {
             Output::info(&format!("Editing '{}'...", query));
             Output::warning("Edit not yet implemented");
             Ok(())
@@ -1223,11 +1269,20 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Generate { length, no_uppercase, no_lowercase, no_digits, no_symbols, passphrase, words, copy } => {
+        Commands::Generate {
+            length,
+            no_uppercase,
+            no_lowercase,
+            no_digits,
+            no_symbols,
+            passphrase,
+            words,
+            copy,
+        } => {
             if passphrase {
                 Output::info(&format!("Generating {}-word passphrase...", words));
-                let generator = crate::crypto::PasswordGenerator::new(words * 5)
-                    .with_lowercase(true);
+                let generator =
+                    crate::crypto::PasswordGenerator::new(words * 5).with_lowercase(true);
                 println!("\n  {}\n", generator.generate());
             } else {
                 generate_and_display_password(
@@ -1242,13 +1297,18 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Search { query } => {
+        Commands::Search { query: _ } => {
             Output::info("Interactive search...");
             Output::warning("Interactive search not yet implemented");
             Ok(())
         }
 
-        Commands::Share { query, to, one_time, expires } => {
+        Commands::Share {
+            query,
+            to,
+            one_time: _,
+            expires: _,
+        } => {
             Output::info(&format!("Sharing '{}' to '{}'...", query, to));
             Output::warning("Sharing not yet implemented");
             Ok(())
@@ -1260,7 +1320,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     Output::header("Your Identity");
                     Output::warning("Identity management not yet implemented");
                 }
-                IdentityCommands::Add { name, public_key } => {
+                IdentityCommands::Add {
+                    name,
+                    public_key: _,
+                } => {
                     Output::info(&format!("Adding identity '{}'...", name));
                 }
                 IdentityCommands::List => {
@@ -1276,7 +1339,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Suggest { analyze, check_breaches } => {
+        Commands::Suggest {
+            analyze,
+            check_breaches,
+        } => {
             Output::header("AI Suggestions");
             if analyze {
                 Output::info("Analyzing vault...");
@@ -1290,7 +1356,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Export { output, format } => {
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
             let _ = session_mgr.refresh(15);
 
@@ -1307,19 +1374,31 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 ExportFormat::Json => {
                     let data = crate::export::export_json(&entries)?;
                     std::fs::write(&output, &data)?;
-                    Output::success(&format!("Exported {} entries to '{}'", entries.len(), output));
+                    Output::success(&format!(
+                        "Exported {} entries to '{}'",
+                        entries.len(),
+                        output
+                    ));
                     Output::warning("Note: Passwords exported in plaintext. Handle with care!");
                 }
                 ExportFormat::Csv => {
                     let data = crate::export::export_csv(&entries)?;
                     std::fs::write(&output, &data)?;
-                    Output::success(&format!("Exported {} entries to '{}'", entries.len(), output));
+                    Output::success(&format!(
+                        "Exported {} entries to '{}'",
+                        entries.len(),
+                        output
+                    ));
                     Output::warning("Note: Passwords exported in plaintext. Handle with care!");
                 }
                 ExportFormat::Encrypted => {
                     let bytes = crate::export::export_encrypted(&entries, &master_key)?;
                     std::fs::write(&output, &bytes)?;
-                    Output::success(&format!("Exported {} entries to '{}' (encrypted)", entries.len(), output));
+                    Output::success(&format!(
+                        "Exported {} entries to '{}' (encrypted)",
+                        entries.len(),
+                        output
+                    ));
                 }
             }
             Ok(())
@@ -1327,7 +1406,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Import { input, format } => {
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
             let _ = session_mgr.refresh(15);
 
@@ -1349,7 +1429,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     crate::import::import_encrypted(&bytes, &master_key)?
                 }
                 ImportFormat::Json | ImportFormat::Csv => {
-                    return Err("Use --format bitwarden, lastpass, onepassword, or encrypted".into());
+                    return Err(
+                        "Use --format bitwarden, lastpass, onepassword, or encrypted".into(),
+                    );
                 }
             };
 
@@ -1385,7 +1467,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Output::field("Name", name);
                 Output::field("Status", "Unlocked");
                 Output::field("Entries", &count.to_string());
-                Output::field("Session expires in", &format!("{} min", info.minutes_remaining()));
+                Output::field(
+                    "Session expires in",
+                    &format!("{} min", info.minutes_remaining()),
+                );
                 println!();
             } else if vault_path.exists() {
                 // Vault exists but locked
@@ -1406,7 +1491,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Health { verbose, check_breaches } => {
+        Commands::Health {
+            verbose,
+            check_breaches,
+        } => {
             let session_mgr = crate::session::SessionManager::new()?;
             let (_, master_key) = session_mgr.load()?;
 
@@ -1426,7 +1514,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             println!();
 
             let mut weak_passwords = Vec::new();
-            let mut reused_passwords: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            let mut reused_passwords: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
             let mut old_passwords = Vec::new();
             let mut no_password = Vec::new();
             let total = entries.len();
@@ -1444,7 +1533,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                 // Check password strength
                 let strength = crate::crypto::PasswordAnalyzer::strength(password);
-                let entropy = crate::crypto::PasswordAnalyzer::entropy(password);
+                let _entropy = crate::crypto::PasswordAnalyzer::entropy(password);
                 let score = match strength {
                     crate::models::PasswordStrength::VeryWeak => 1,
                     crate::models::PasswordStrength::Weak => 2,
@@ -1458,7 +1547,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                 // Check for reuse
                 let hash = format!("{:x}", md5_hash(password));
-                reused_passwords.entry(hash).or_default().push(entry.name.clone());
+                reused_passwords
+                    .entry(hash)
+                    .or_default()
+                    .push(entry.name.clone());
 
                 // Check age
                 if entry.updated_at < ninety_days_ago {
@@ -1468,19 +1560,30 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Filter to only show reused (more than 1 entry with same password)
-            let reused: Vec<_> = reused_passwords.into_iter()
+            let reused: Vec<_> = reused_passwords
+                .into_iter()
                 .filter(|(_, names)| names.len() > 1)
                 .collect();
 
             // Calculate health score
             let issues = weak_passwords.len() + reused.len() + old_passwords.len();
-            let score = if total == 0 { 100 } else {
+            let score = if total == 0 {
+                100
+            } else {
                 100 - (issues * 100 / total).min(100)
             };
 
-            let score_color = if score >= 80 { "\x1b[32m" } // Green
-                else if score >= 60 { "\x1b[33m" } // Yellow
-                else { "\x1b[31m" }; // Red
+            let score_color = if score >= 80 {
+                "\x1b[32m"
+            }
+            // Green
+            else if score >= 60 {
+                "\x1b[33m"
+            }
+            // Yellow
+            else {
+                "\x1b[31m"
+            }; // Red
 
             println!("  Health Score: {}{}%\x1b[0m", score_color, score);
             println!("  Total Entries: {}", total);
@@ -1501,7 +1604,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Reused passwords
             if !reused.is_empty() {
                 let count: usize = reused.iter().map(|(_, n)| n.len()).sum();
-                Output::warning(&format!("{} entries share passwords ({} unique reused)", count, reused.len()));
+                Output::warning(&format!(
+                    "{} entries share passwords ({} unique reused)",
+                    count,
+                    reused.len()
+                ));
                 if verbose {
                     for (_, names) in &reused {
                         println!("    • Shared by: {}", names.join(", "));
@@ -1513,7 +1620,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             // Old passwords
             if !old_passwords.is_empty() {
-                Output::warning(&format!("{} passwords older than 90 days", old_passwords.len()));
+                Output::warning(&format!(
+                    "{} passwords older than 90 days",
+                    old_passwords.len()
+                ));
                 if verbose {
                     for (name, days) in &old_passwords {
                         println!("    • {} ({} days old)", name, days);
@@ -1525,7 +1635,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             // No password entries
             if !no_password.is_empty() {
-                Output::info(&format!("{} entries without passwords (notes/cards)", no_password.len()));
+                Output::info(&format!(
+                    "{} entries without passwords (notes/cards)",
+                    no_password.len()
+                ));
             }
 
             // Breach check (optional)
@@ -1533,9 +1646,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 println!();
                 Output::info("Checking passwords against Have I Been Pwned...");
                 let rt = tokio::runtime::Runtime::new()?;
-                let mut config = crate::ai::AiConfig::default();
-                config.check_breaches = true;
-                config.enable_suggestions = false;
+                let config = crate::ai::AiConfig {
+                    check_breaches: true,
+                    enable_suggestions: false,
+                    ..Default::default()
+                };
                 let ai = crate::ai::PasswordAi::new(config);
                 let mut breached = Vec::new();
 
@@ -1566,9 +1681,14 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::History { query, show, restore } => {
+        Commands::History {
+            query,
+            show,
+            restore,
+        } => {
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -1576,15 +1696,21 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             // Find entry
             let entries = storage.list_entries()?;
-            let entry = entries.iter()
-                .find(|e| e.name.to_lowercase().contains(&query.to_lowercase()) || e.id.to_string() == query)
+            let entry = entries
+                .iter()
+                .find(|e| {
+                    e.name.to_lowercase().contains(&query.to_lowercase())
+                        || e.id.to_string() == query
+                })
                 .ok_or_else(|| format!("Entry '{}' not found", query))?;
 
             let history = entry.get_password_history();
 
             if let Some(index) = restore {
                 if index == 0 || index > history.len() {
-                    return Err(format!("Invalid history index. Available: 1-{}", history.len()).into());
+                    return Err(
+                        format!("Invalid history index. Available: 1-{}", history.len()).into(),
+                    );
                 }
 
                 // Get a mutable copy
@@ -1592,7 +1718,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 entry_clone.restore_password(index - 1);
                 storage.update_entry(&entry_clone)?;
 
-                Output::success(&format!("Restored password #{} for '{}'", index, entry.name));
+                Output::success(&format!(
+                    "Restored password #{} for '{}'",
+                    index, entry.name
+                ));
                 return Ok(());
             }
 
@@ -1619,7 +1748,13 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     println!("  {}. {} ({})", i + 1, hist.password.expose(), age_str);
                 } else {
                     let masked = "*".repeat(hist.password.len().min(12));
-                    println!("  {}. {} ({} chars, {})", i + 1, masked, hist.password.len(), age_str);
+                    println!(
+                        "  {}. {} ({} chars, {})",
+                        i + 1,
+                        masked,
+                        hist.password.len(),
+                        age_str
+                    );
                 }
             }
 
@@ -1664,7 +1799,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Batch { command } => {
             let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr.load()
+            let (vault_path, master_key) = session_mgr
+                .load()
                 .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -1673,14 +1809,22 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let all_entries = storage.list_entries()?;
 
             match command {
-                BatchCommands::Tag { filter, folder, add, remove } => {
+                BatchCommands::Tag {
+                    filter,
+                    folder,
+                    add,
+                    remove,
+                } => {
                     // Filter entries
-                    let matches: Vec<_> = all_entries.iter()
+                    let matches: Vec<_> = all_entries
+                        .iter()
                         .filter(|e| {
-                            let name_match = filter.as_ref()
+                            let name_match = filter
+                                .as_ref()
                                 .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
                                 .unwrap_or(true);
-                            let folder_match = folder.as_ref()
+                            let folder_match = folder
+                                .as_ref()
                                 .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
                                 .unwrap_or(true);
                             name_match && folder_match
@@ -1729,17 +1873,25 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     Ok(())
                 }
 
-                BatchCommands::Delete { filter, tags, folder, yes } => {
+                BatchCommands::Delete {
+                    filter,
+                    tags,
+                    folder,
+                    yes,
+                } => {
                     let tag_list: Vec<String> = tags
                         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default();
 
-                    let matches: Vec<_> = all_entries.iter()
+                    let matches: Vec<_> = all_entries
+                        .iter()
                         .filter(|e| {
-                            let name_match = filter.as_ref()
+                            let name_match = filter
+                                .as_ref()
                                 .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
                                 .unwrap_or(true);
-                            let folder_match = folder.as_ref()
+                            let folder_match = folder
+                                .as_ref()
                                 .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
                                 .unwrap_or(true);
                             let tag_match = if tag_list.is_empty() {
@@ -1763,9 +1915,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     println!();
 
                     if !yes {
-                        let confirm = Prompts::confirm(&format!(
-                            "Delete {} entries? This cannot be undone", matches.len()
-                        ), false)?;
+                        let confirm = Prompts::confirm(
+                            &format!("Delete {} entries? This cannot be undone", matches.len()),
+                            false,
+                        )?;
                         if !confirm {
                             Output::info("Cancelled");
                             return Ok(());
@@ -1785,9 +1938,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                         .unwrap_or_default();
 
-                    let matches: Vec<_> = all_entries.iter()
+                    let matches: Vec<_> = all_entries
+                        .iter()
                         .filter(|e| {
-                            let name_match = filter.as_ref()
+                            let name_match = filter
+                                .as_ref()
                                 .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
                                 .unwrap_or(true);
                             let tag_match = if tag_list.is_empty() {
@@ -1811,17 +1966,28 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         storage.update_entry(&entry_clone)?;
                     }
 
-                    Output::success(&format!("Moved {} entries to folder '{}'", matches.len(), to));
+                    Output::success(&format!(
+                        "Moved {} entries to folder '{}'",
+                        matches.len(),
+                        to
+                    ));
                     Ok(())
                 }
 
-                BatchCommands::Favorite { filter, folder, set } => {
-                    let matches: Vec<_> = all_entries.iter()
+                BatchCommands::Favorite {
+                    filter,
+                    folder,
+                    set,
+                } => {
+                    let matches: Vec<_> = all_entries
+                        .iter()
                         .filter(|e| {
-                            let name_match = filter.as_ref()
+                            let name_match = filter
+                                .as_ref()
                                 .map(|f| e.name.to_lowercase().contains(&f.to_lowercase()))
                                 .unwrap_or(true);
-                            let folder_match = folder.as_ref()
+                            let folder_match = folder
+                                .as_ref()
                                 .map(|f| e.folder.as_ref().map(|ef| ef == f).unwrap_or(false))
                                 .unwrap_or(true);
                             name_match && folder_match
@@ -1845,7 +2011,18 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let action = if set { "favorited" } else { "unfavorited" };
-                    Output::success(&format!("{} {} entries", action.to_string().chars().next().unwrap().to_uppercase().to_string() + &action[1..], updated));
+                    Output::success(&format!(
+                        "{} {} entries",
+                        action
+                            .to_string()
+                            .chars()
+                            .next()
+                            .unwrap()
+                            .to_uppercase()
+                            .to_string()
+                            + &action[1..],
+                        updated
+                    ));
                     Ok(())
                 }
             }
@@ -1888,7 +2065,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     // Look for matching entry
                     let session_mgr = crate::session::SessionManager::new()?;
-                    let (vault_path, master_key) = session_mgr.load()
+                    let (vault_path, master_key) = session_mgr
+                        .load()
                         .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
                     let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -1896,14 +2074,15 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let entries = storage.list_entries()?;
 
                     // Search for entries matching the host
-                    let url_to_match = if path.is_empty() {
+                    let _url_to_match = if path.is_empty() {
                         format!("{}://{}", protocol, host)
                     } else {
                         format!("{}://{}/{}", protocol, host, path)
                     };
 
                     // Find best match - first try exact URL match, then host match
-                    let matching_entry = entries.iter()
+                    let matching_entry = entries
+                        .iter()
                         .filter(|e| e.url.is_some() && e.username.is_some() && e.password.is_some())
                         .find(|e| {
                             let entry_url = e.url.as_ref().unwrap().to_lowercase();
@@ -1911,7 +2090,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         });
 
                     if let Some(entry) = matching_entry {
-                        if let (Some(username), Some(password)) = (&entry.username, &entry.password) {
+                        if let (Some(username), Some(password)) = (&entry.username, &entry.password)
+                        {
                             println!("username={}", username);
                             println!("password={}", password.expose());
                         }
@@ -1957,7 +2137,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if entry already exists
                     let session_mgr = crate::session::SessionManager::new()?;
-                    let (vault_path, master_key) = session_mgr.load()
+                    let (vault_path, master_key) = session_mgr
+                        .load()
                         .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
                     let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -1971,8 +2152,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     let existing = entries.iter().find(|e| {
-                        e.url.as_ref().map(|u| u.to_lowercase().contains(&host.to_lowercase())).unwrap_or(false) &&
-                        e.username.as_ref().map(|u| u == &username).unwrap_or(false)
+                        e.url
+                            .as_ref()
+                            .map(|u| u.to_lowercase().contains(&host.to_lowercase()))
+                            .unwrap_or(false)
+                            && e.username.as_ref().map(|u| u == &username).unwrap_or(false)
                     });
 
                     if let Some(entry) = existing {
@@ -2025,7 +2209,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     // Find and delete matching entry
                     let session_mgr = crate::session::SessionManager::new()?;
-                    let (vault_path, master_key) = session_mgr.load()
+                    let (vault_path, master_key) = session_mgr
+                        .load()
                         .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
 
                     let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -2033,7 +2218,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let entries = storage.list_entries()?;
 
                     let matching_entry = entries.iter().find(|e| {
-                        let url_match = e.url.as_ref()
+                        let url_match = e
+                            .url
+                            .as_ref()
                             .map(|u| u.to_lowercase().contains(&host.to_lowercase()))
                             .unwrap_or(false);
                         let user_match = if username.is_empty() {
@@ -2073,19 +2260,32 @@ mod tests {
 
     #[test]
     fn test_cli_add_with_fields() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "vaultic",
-            "add", "MyEntry",
-            "--username", "user@example.com",
-            "--password", "secret",
-            "--field", "key1=value1",
-            "--field", "key2=value2",
-            "--notes", "Some notes",
+            "add",
+            "MyEntry",
+            "--username",
+            "user@example.com",
+            "--password",
+            "secret",
+            "--field",
+            "key1=value1",
+            "--field",
+            "key2=value2",
+            "--notes",
+            "Some notes",
             "--favorite",
-        ]).unwrap();
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Add { name, fields, notes, favorite, .. } => {
+            Commands::Add {
+                name,
+                fields,
+                notes,
+                favorite,
+                ..
+            } => {
                 assert_eq!(name, "MyEntry");
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0], "key1=value1");
@@ -2099,16 +2299,25 @@ mod tests {
 
     #[test]
     fn test_cli_batch_delete() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "vaultic",
-            "batch", "delete",
-            "--filter", "test",
-            "--tags", "old,unused",
+            "batch",
+            "delete",
+            "--filter",
+            "test",
+            "--tags",
+            "old,unused",
             "--yes",
-        ]).unwrap();
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Batch { command: BatchCommands::Delete { filter, tags, yes, .. } } => {
+            Commands::Batch {
+                command:
+                    BatchCommands::Delete {
+                        filter, tags, yes, ..
+                    },
+            } => {
                 assert_eq!(filter, Some("test".to_string()));
                 assert_eq!(tags, Some("old,unused".to_string()));
                 assert!(yes);
@@ -2119,15 +2328,21 @@ mod tests {
 
     #[test]
     fn test_cli_batch_move() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             "vaultic",
-            "batch", "move",
-            "--filter", "github",
-            "--to", "work/development",
-        ]).unwrap();
+            "batch",
+            "move",
+            "--filter",
+            "github",
+            "--to",
+            "work/development",
+        ])
+        .unwrap();
 
         match cli.command {
-            Commands::Batch { command: BatchCommands::Move { filter, to, .. } } => {
+            Commands::Batch {
+                command: BatchCommands::Move { filter, to, .. },
+            } => {
                 assert_eq!(filter, Some("github".to_string()));
                 assert_eq!(to, "work/development");
             }
@@ -2137,40 +2352,38 @@ mod tests {
 
     #[test]
     fn test_cli_credential_get() {
-        let cli = Cli::try_parse_from(&[
-            "vaultic",
-            "credential", "get",
-        ]).unwrap();
+        let cli = Cli::try_parse_from(["vaultic", "credential", "get"]).unwrap();
 
         match cli.command {
-            Commands::Credential { command: CredentialCommands::Get } => {}
+            Commands::Credential {
+                command: CredentialCommands::Get,
+            } => {}
             _ => panic!("Expected Credential Get command"),
         }
     }
 
     #[test]
     fn test_cli_credential_store() {
-        let cli = Cli::try_parse_from(&[
-            "vaultic",
-            "credential", "store",
-        ]).unwrap();
+        let cli = Cli::try_parse_from(["vaultic", "credential", "store"]).unwrap();
 
         match cli.command {
-            Commands::Credential { command: CredentialCommands::Store } => {}
+            Commands::Credential {
+                command: CredentialCommands::Store,
+            } => {}
             _ => panic!("Expected Credential Store command"),
         }
     }
 
     #[test]
     fn test_cli_history() {
-        let cli = Cli::try_parse_from(&[
-            "vaultic",
-            "history", "github",
-            "--show",
-        ]).unwrap();
+        let cli = Cli::try_parse_from(["vaultic", "history", "github", "--show"]).unwrap();
 
         match cli.command {
-            Commands::History { query, show, restore } => {
+            Commands::History {
+                query,
+                show,
+                restore,
+            } => {
                 assert_eq!(query, "github");
                 assert!(show);
                 assert_eq!(restore, None);

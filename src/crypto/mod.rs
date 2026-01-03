@@ -1,5 +1,5 @@
 //! Cryptographic primitives for Vaultic
-//! 
+//!
 //! Security design:
 //! - XChaCha20-Poly1305 for symmetric encryption (256-bit, AEAD)
 //! - Argon2id for key derivation (memory-hard, side-channel resistant)
@@ -72,15 +72,15 @@ impl MasterKey {
     /// Derive encryption and authentication keys
     pub fn derive_keys(&self) -> DerivedKeys {
         let hk = Hkdf::<Sha256>::new(None, &self.0);
-        
+
         let mut encryption_key = [0u8; 32];
         let mut auth_key = [0u8; 32];
-        
+
         hk.expand(b"vaultic-encryption-key-v1", &mut encryption_key)
             .expect("HKDF expansion failed");
         hk.expand(b"vaultic-auth-key-v1", &mut auth_key)
             .expect("HKDF expansion failed");
-        
+
         DerivedKeys {
             encryption_key,
             auth_key,
@@ -139,13 +139,13 @@ impl Cipher {
     /// Encrypt with additional authenticated data
     pub fn encrypt_aad(&self, plaintext: &[u8], aad: &[u8]) -> CryptoResult<Vec<u8>> {
         use chacha20poly1305::aead::Payload;
-        
+
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         let payload = Payload {
             msg: plaintext,
             aad,
         };
-        
+
         let ciphertext = self
             .cipher
             .encrypt(&nonce, payload)
@@ -160,7 +160,7 @@ impl Cipher {
     /// Decrypt with additional authenticated data
     pub fn decrypt_aad(&self, ciphertext: &[u8], aad: &[u8]) -> CryptoResult<Vec<u8>> {
         use chacha20poly1305::aead::Payload;
-        
+
         if ciphertext.len() < 24 {
             return Err(CryptoError::InvalidNonceLength);
         }
@@ -207,7 +207,7 @@ impl KeyDeriver {
         let salt = SaltString::generate(&mut OsRng);
         KdfParams {
             algorithm: "argon2id".to_string(),
-            memory_cost: 65536,  // 64 MiB
+            memory_cost: 65536, // 64 MiB
             time_cost: 3,
             parallelism: 4,
             salt: salt.as_str().as_bytes().to_vec(),
@@ -219,7 +219,7 @@ impl KeyDeriver {
         let salt = SaltString::generate(&mut OsRng);
         KdfParams {
             algorithm: "argon2id".to_string(),
-            memory_cost: 262144,  // 256 MiB
+            memory_cost: 262144, // 256 MiB
             time_cost: 4,
             parallelism: 8,
             salt: salt.as_str().as_bytes().to_vec(),
@@ -242,7 +242,7 @@ impl IdentityKeyPair {
         let mut exchange_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut exchange_bytes);
         let exchange_secret = StaticSecret::from(exchange_bytes);
-        
+
         Self {
             signing_key,
             exchange_secret,
@@ -266,7 +266,9 @@ impl IdentityKeyPair {
 
     /// Perform key exchange with a recipient's public key
     pub fn key_exchange(&self, recipient_public: &X25519PublicKey) -> [u8; 32] {
-        self.exchange_secret.diffie_hellman(recipient_public).to_bytes()
+        self.exchange_secret
+            .diffie_hellman(recipient_public)
+            .to_bytes()
     }
 
     /// Export keys for storage (encrypted with master key)
@@ -306,11 +308,11 @@ impl IdentityKeyPair {
         hasher.update(self.signing_public_key().as_bytes());
         hasher.update(self.exchange_public_key().as_bytes());
         let hash = hasher.finalize();
-        
+
         // Format as groups of 4 hex chars
         hash[..16]
             .chunks(4)
-            .map(|c| hex::encode(c))
+            .map(hex::encode)
             .collect::<Vec<_>>()
             .join(":")
     }
@@ -323,22 +325,22 @@ impl KeyExchange {
     /// Create a shared secret for encrypting data to share
     /// Returns (encrypted_key, symmetric_key)
     pub fn create_shared_secret(
-        sender_keypair: &IdentityKeyPair,
+        _sender_keypair: &IdentityKeyPair,
         recipient_public: &X25519PublicKey,
     ) -> ([u8; 32], Vec<u8>) {
         // Ephemeral key for perfect forward secrecy
         let ephemeral_secret = EphemeralSecret::random_from_rng(OsRng);
         let ephemeral_public = X25519PublicKey::from(&ephemeral_secret);
-        
+
         // DH with ephemeral
         let shared_secret = ephemeral_secret.diffie_hellman(recipient_public);
-        
+
         // Derive actual encryption key
         let hk = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
         let mut symmetric_key = [0u8; 32];
         hk.expand(b"vaultic-shared-secret-v1", &mut symmetric_key)
             .expect("HKDF expansion failed");
-        
+
         // Return ephemeral public key (to send) and symmetric key (for encryption)
         (symmetric_key, ephemeral_public.as_bytes().to_vec())
     }
@@ -357,14 +359,14 @@ impl KeyExchange {
 
         let ephemeral_public_array: [u8; 32] = ephemeral_public_bytes.try_into().unwrap();
         let ephemeral_public = X25519PublicKey::from(ephemeral_public_array);
-        
+
         let shared_secret = recipient_keypair.key_exchange(&ephemeral_public);
-        
+
         let hk = Hkdf::<Sha256>::new(None, &shared_secret);
         let mut symmetric_key = [0u8; 32];
         hk.expand(b"vaultic-shared-secret-v1", &mut symmetric_key)
             .expect("HKDF expansion failed");
-        
+
         Ok(symmetric_key)
     }
 }
@@ -398,10 +400,18 @@ impl PasswordAnalyzer {
         let has_digit = password.chars().any(|c| c.is_ascii_digit());
         let has_special = password.chars().any(|c| !c.is_alphanumeric());
 
-        if has_lower { charset_size += 26; }
-        if has_upper { charset_size += 26; }
-        if has_digit { charset_size += 10; }
-        if has_special { charset_size += 32; }
+        if has_lower {
+            charset_size += 26;
+        }
+        if has_upper {
+            charset_size += 26;
+        }
+        if has_digit {
+            charset_size += 10;
+        }
+        if has_special {
+            charset_size += 32;
+        }
 
         len * (charset_size as f64).log2()
     }
@@ -409,9 +419,9 @@ impl PasswordAnalyzer {
     /// Assess password strength
     pub fn strength(password: &str) -> crate::models::PasswordStrength {
         use crate::models::PasswordStrength;
-        
+
         let entropy = Self::entropy(password);
-        
+
         if entropy < 28.0 {
             PasswordStrength::VeryWeak
         } else if entropy < 36.0 {
@@ -428,10 +438,12 @@ impl PasswordAnalyzer {
     /// Check for common password patterns
     pub fn has_common_patterns(password: &str) -> bool {
         let lower = password.to_lowercase();
-        
+
         // Common sequences
-        let sequences = ["123456", "qwerty", "password", "abc123", "111111", "letmein"];
-        
+        let sequences = [
+            "123456", "qwerty", "password", "abc123", "111111", "letmein",
+        ];
+
         sequences.iter().any(|seq| lower.contains(seq))
     }
 }
@@ -496,7 +508,7 @@ impl PasswordGenerator {
 
     pub fn generate(&self) -> String {
         let mut charset = String::new();
-        
+
         const LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
         const UPPERCASE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         const DIGITS: &str = "0123456789";
@@ -521,7 +533,10 @@ impl PasswordGenerator {
         }
 
         if self.exclude_ambiguous {
-            charset = charset.chars().filter(|c| !AMBIGUOUS.contains(*c)).collect();
+            charset = charset
+                .chars()
+                .filter(|c| !AMBIGUOUS.contains(*c))
+                .collect();
         }
 
         let charset: Vec<char> = charset.chars().collect();
@@ -544,10 +559,9 @@ impl PasswordGenerator {
     pub fn generate_passphrase(word_count: usize) -> String {
         // Simple word list (in production, use EFF wordlist)
         const WORDS: &[&str] = &[
-            "correct", "horse", "battery", "staple", "quantum", "crystal",
-            "thunder", "phoenix", "dragon", "silver", "golden", "cosmic",
-            "nebula", "galaxy", "solar", "lunar", "stellar", "orbital",
-            "cipher", "vector", "matrix", "prism", "vertex", "helix",
+            "correct", "horse", "battery", "staple", "quantum", "crystal", "thunder", "phoenix",
+            "dragon", "silver", "golden", "cosmic", "nebula", "galaxy", "solar", "lunar",
+            "stellar", "orbital", "cipher", "vector", "matrix", "prism", "vertex", "helix",
             "carbon", "silicon", "helium", "neon", "argon", "xenon",
         ];
 
@@ -579,10 +593,10 @@ mod tests {
         let key = [0u8; 32];
         let cipher = Cipher::new(&key);
         let plaintext = b"Hello, Vaultic!";
-        
+
         let encrypted = cipher.encrypt(plaintext).unwrap();
         let decrypted = cipher.decrypt(&encrypted).unwrap();
-        
+
         assert_eq!(plaintext.as_slice(), decrypted.as_slice());
     }
 
@@ -590,10 +604,10 @@ mod tests {
     fn test_key_derivation() {
         let password = b"super_secret_password";
         let params = KeyDeriver::generate_params();
-        
+
         let key1 = KeyDeriver::derive_from_password(password, &params).unwrap();
         let key2 = KeyDeriver::derive_from_password(password, &params).unwrap();
-        
+
         assert_eq!(key1.as_bytes(), key2.as_bytes());
     }
 
@@ -601,10 +615,10 @@ mod tests {
     fn test_identity_keypair() {
         let keypair = IdentityKeyPair::generate();
         let message = b"Sign this message";
-        
+
         let signature = keypair.sign(message);
         let public_key = keypair.signing_public_key();
-        
+
         SignatureVerifier::verify(&public_key, message, &signature).unwrap();
     }
 
@@ -612,7 +626,7 @@ mod tests {
     fn test_password_generator() {
         let password = PasswordGenerator::new(24).generate();
         assert_eq!(password.len(), 24);
-        
+
         let entropy = PasswordAnalyzer::entropy(&password);
         assert!(entropy > 60.0);
     }
@@ -621,10 +635,11 @@ mod tests {
     fn test_key_exchange() {
         let alice = IdentityKeyPair::generate();
         let bob = IdentityKeyPair::generate();
-        
-        let (alice_key, ephemeral) = KeyExchange::create_shared_secret(&alice, &bob.exchange_public_key());
+
+        let (alice_key, ephemeral) =
+            KeyExchange::create_shared_secret(&alice, &bob.exchange_public_key());
         let bob_key = KeyExchange::recover_shared_secret(&bob, &ephemeral).unwrap();
-        
+
         assert_eq!(alice_key, bob_key);
     }
 }

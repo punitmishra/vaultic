@@ -15,12 +15,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Clear},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
 use thiserror::Error;
 
-use crate::crypto::MasterKey;
 use crate::models::VaultEntry;
 use crate::session::SessionManager;
 use crate::storage::VaultStorage;
@@ -44,9 +43,10 @@ pub enum TuiError {
 pub type TuiResult<T> = Result<T, TuiError>;
 
 /// Application mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     /// Viewing entry list
+    #[default]
     List,
     /// Searching entries
     Search,
@@ -56,12 +56,6 @@ pub enum Mode {
     Help,
     /// Confirm delete
     ConfirmDelete,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self::List
-    }
 }
 
 /// TUI Application state
@@ -150,7 +144,8 @@ impl App {
             self.list_state.select(None);
         } else if let Some(selected) = self.list_state.selected() {
             if selected >= self.filtered_entries.len() {
-                self.list_state.select(Some(self.filtered_entries.len() - 1));
+                self.list_state
+                    .select(Some(self.filtered_entries.len() - 1));
             }
         } else {
             self.list_state.select(Some(0));
@@ -195,7 +190,8 @@ impl App {
     /// Go to last entry
     pub fn select_last(&mut self) {
         if !self.filtered_entries.is_empty() {
-            self.list_state.select(Some(self.filtered_entries.len() - 1));
+            self.list_state
+                .select(Some(self.filtered_entries.len() - 1));
         }
     }
 
@@ -205,10 +201,12 @@ impl App {
             if let Some(password) = &entry.password {
                 let mut clipboard = arboard::Clipboard::new()
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
-                clipboard.set_text(password.expose().to_string())
+                clipboard
+                    .set_text(password.expose().to_string())
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
 
-                self.status_message = Some(format!("Password for '{}' copied to clipboard", entry.name));
+                self.status_message =
+                    Some(format!("Password for '{}' copied to clipboard", entry.name));
             } else {
                 self.status_message = Some("No password for this entry".to_string());
             }
@@ -347,11 +345,14 @@ pub fn run() -> TuiResult<()> {
 /// Run the TUI with optional vault path
 pub fn run_with_vault(vault_path: Option<&std::path::Path>) -> TuiResult<()> {
     // Load session to verify vault is unlocked
-    let session_mgr = SessionManager::new()
-        .map_err(|e| TuiError::Session(e.to_string()))?;
+    let session_mgr = SessionManager::new().map_err(|e| TuiError::Session(e.to_string()))?;
 
-    let (session_vault_path, master_key) = session_mgr.load()
-        .map_err(|e| TuiError::Session(format!("Vault is locked: {}. Run 'vaultic unlock' first.", e)))?;
+    let (session_vault_path, master_key) = session_mgr.load().map_err(|e| {
+        TuiError::Session(format!(
+            "Vault is locked: {}. Run 'vaultic unlock' first.",
+            e
+        ))
+    })?;
 
     // Use provided path or session's vault path
     let vault_dir = vault_path
@@ -359,14 +360,15 @@ pub fn run_with_vault(vault_path: Option<&std::path::Path>) -> TuiResult<()> {
         .unwrap_or(session_vault_path);
 
     // Open storage and unlock with master key
-    let mut storage = VaultStorage::open(&vault_dir)
-        .map_err(|e| TuiError::Vault(e.to_string()))?;
+    let mut storage = VaultStorage::open(&vault_dir).map_err(|e| TuiError::Vault(e.to_string()))?;
 
-    storage.unlock(&master_key)
+    storage
+        .unlock(&master_key)
         .map_err(|e| TuiError::Vault(e.to_string()))?;
 
     // Verify we can list entries
-    let _ = storage.list_entries()
+    let _ = storage
+        .list_entries()
         .map_err(|e| TuiError::Vault(e.to_string()))?;
 
     // Create app
@@ -417,18 +419,27 @@ fn ui(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Main content
-            Constraint::Length(3),  // Footer/status
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Main content
+            Constraint::Length(3), // Footer/status
         ])
         .split(f.area());
 
     // Header
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("  Vaultic", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  Vaultic",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" - Password Manager"),
     ]))
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
     f.render_widget(header, chunks[0]);
 
     // Main content
@@ -447,7 +458,9 @@ fn ui(f: &mut Frame, app: &App) {
         msg.clone()
     } else {
         match app.mode {
-            Mode::List => "j/k:nav  /:search  Enter:view  y:copy  d:delete  ?:help  q:quit".to_string(),
+            Mode::List => {
+                "j/k:nav  /:search  Enter:view  y:copy  d:delete  ?:help  q:quit".to_string()
+            }
             Mode::Search => format!("Search: {}█", app.search_query),
             Mode::Detail => "y:copy  p:toggle password  d:delete  q/Esc:back".to_string(),
             Mode::Help => "Press q or ? to close help".to_string(),
@@ -475,7 +488,12 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
             };
 
             ListItem::new(Line::from(vec![
-                Span::styled(&entry.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &entry.name,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" "),
                 Span::styled(username, Style::default().fg(Color::Gray)),
                 Span::styled(tags, Style::default().fg(Color::DarkGray)),
@@ -486,7 +504,11 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_query.is_empty() {
         format!(" Entries ({}) ", app.entries.len())
     } else {
-        format!(" Search: \"{}\" ({} matches) ", app.search_query, app.filtered_entries.len())
+        format!(
+            " Search: \"{}\" ({} matches) ",
+            app.search_query,
+            app.filtered_entries.len()
+        )
     };
 
     let list = List::new(items)
@@ -516,7 +538,12 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![
         Line::from(vec![
             Span::styled("Name:     ", Style::default().fg(Color::Gray)),
-            Span::styled(&entry.name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &entry.name,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -525,8 +552,22 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Password: ", Style::default().fg(Color::Gray)),
-            Span::styled(password_display, Style::default().fg(if app.show_password { Color::Yellow } else { Color::DarkGray })),
-            Span::styled(if app.show_password { " (visible)" } else { " (hidden, press p to show)" }, Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                password_display,
+                Style::default().fg(if app.show_password {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
+            ),
+            Span::styled(
+                if app.show_password {
+                    " (visible)"
+                } else {
+                    " (hidden, press p to show)"
+                },
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
     ];
 
@@ -563,43 +604,62 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
 
     if let Some(notes) = &entry.notes {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Notes:", Style::default().fg(Color::Gray)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Notes:",
+            Style::default().fg(Color::Gray),
+        )]));
         for line in notes.expose().lines() {
             lines.push(Line::from(format!("  {}", line)));
         }
     }
 
-    let detail = Paragraph::new(lines)
-        .block(Block::default().title(" Entry Details ").borders(Borders::ALL));
+    let detail = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Entry Details ")
+            .borders(Borders::ALL),
+    );
     f.render_widget(detail, area);
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
     let help_text = vec![
-        Line::from(Span::styled("Navigation", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  j / ↓     Move down"),
         Line::from("  k / ↑     Move up"),
         Line::from("  g         Go to first entry"),
         Line::from("  G         Go to last entry"),
         Line::from("  Enter     View entry details"),
         Line::from(""),
-        Line::from(Span::styled("Actions", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Actions",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  /         Search entries"),
         Line::from("  y         Copy password to clipboard"),
         Line::from("  p         Toggle password visibility (in detail view)"),
         Line::from("  d         Delete entry"),
         Line::from("  r         Refresh entries"),
         Line::from(""),
-        Line::from(Span::styled("General", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "General",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  ?         Show/hide this help"),
         Line::from("  Esc       Cancel / go back"),
         Line::from("  q         Quit"),
     ];
 
-    let help = Paragraph::new(help_text)
-        .block(Block::default().title(" Help ").borders(Borders::ALL));
+    let help =
+        Paragraph::new(help_text).block(Block::default().title(" Help ").borders(Borders::ALL));
     f.render_widget(help, area);
 }
 

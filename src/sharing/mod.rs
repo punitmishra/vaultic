@@ -1,5 +1,5 @@
 //! Secure password sharing functionality
-//! 
+//!
 //! Uses asymmetric encryption (X25519 + XChaCha20-Poly1305) for
 //! end-to-end encrypted sharing between users.
 
@@ -175,9 +175,9 @@ impl SharingManager {
 
         let mut entry = VaultEntry::new(data.name.clone(), data.entry_type.clone());
         entry.username = data.username.clone();
-        entry.password = data.password.as_ref().map(|p| SensitiveString::new(p));
+        entry.password = data.password.as_ref().map(SensitiveString::new);
         entry.url = data.url.clone();
-        entry.notes = data.notes.as_ref().map(|n| SensitiveString::new(n));
+        entry.notes = data.notes.as_ref().map(SensitiveString::new);
         entry.custom_fields = data
             .custom_fields
             .iter()
@@ -187,7 +187,7 @@ impl SharingManager {
                 is_hidden: *hidden,
             })
             .collect();
-        entry.totp_secret = data.totp_secret.as_ref().map(|t| SensitiveString::new(t));
+        entry.totp_secret = data.totp_secret.as_ref().map(SensitiveString::new);
 
         // Add import metadata
         entry.tags.push("imported".to_string());
@@ -249,9 +249,9 @@ impl SharingManager {
 
     /// Generate a QR code for sharing
     pub fn generate_share_qr(&self, share: &SharedSecret) -> SharingResult<Vec<u8>> {
-        use qrcode::QrCode;
-        use image::Luma;
         use image::ImageEncoder;
+        use image::Luma;
+        use qrcode::QrCode;
 
         let link = self.create_share_link(share);
         let code = QrCode::new(link.as_bytes()).map_err(|_| SharingError::InvalidShareData)?;

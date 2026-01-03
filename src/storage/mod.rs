@@ -1,5 +1,5 @@
 //! Encrypted storage layer for Vaultic
-//! 
+//!
 //! Uses sled as the underlying database with all data encrypted at rest.
 //! Supports multiple vaults and secure key storage.
 
@@ -10,7 +10,7 @@ use sled::{Db, Tree};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::crypto::{Cipher, CryptoError, DerivedKeys, MasterKey};
+use crate::crypto::{Cipher, CryptoError, MasterKey};
 use crate::models::{
     AuditLogEntry, KdfParams, SearchFilter, SharedSecret, UserIdentity, VaultEntry, VaultMetadata,
 };
@@ -55,6 +55,7 @@ mod trees {
 /// Encrypted vault storage
 pub struct VaultStorage {
     db: Db,
+    #[allow(dead_code)]
     path: PathBuf,
     cipher: Option<Cipher>,
     metadata: Option<VaultMetadata>,
@@ -83,7 +84,7 @@ impl VaultStorage {
         owner_fingerprint: String,
     ) -> StorageResult<Self> {
         let path = path.as_ref().to_path_buf();
-        
+
         if path.exists() {
             return Err(StorageError::VaultAlreadyExists);
         }
@@ -104,7 +105,7 @@ impl VaultStorage {
             kdf_params,
         };
 
-        let mut storage = Self {
+        let storage = Self {
             db,
             path: path.clone(),
             cipher: Some(cipher),
@@ -126,7 +127,7 @@ impl VaultStorage {
 
         // Try to decrypt metadata to verify key
         let metadata = self.load_metadata(&cipher)?;
-        
+
         self.cipher = Some(cipher);
         self.metadata = Some(metadata);
 
@@ -173,7 +174,7 @@ impl VaultStorage {
         key: &[u8],
     ) -> StorageResult<Option<T>> {
         let cipher = self.get_cipher()?;
-        
+
         if let Some(encrypted) = tree.get(key)? {
             let decrypted = cipher.decrypt(&encrypted)?;
             let value = bincode::deserialize(&decrypted)?;
@@ -186,7 +187,7 @@ impl VaultStorage {
     /// Load metadata (used during unlock)
     fn load_metadata(&self, cipher: &Cipher) -> StorageResult<VaultMetadata> {
         let tree = self.get_tree(trees::METADATA)?;
-        
+
         if let Some(encrypted) = tree.get(b"vault_metadata")? {
             let decrypted = cipher.decrypt(&encrypted)?;
             let metadata = bincode::deserialize(&decrypted)?;
@@ -234,7 +235,7 @@ impl VaultStorage {
     /// Update an entry
     pub fn update_entry(&self, entry: &VaultEntry) -> StorageResult<()> {
         let tree = self.get_tree(trees::ENTRIES)?;
-        
+
         // Verify entry exists
         if tree.get(entry.id.as_bytes())?.is_none() {
             return Err(StorageError::NotFound(entry.id.to_string()));
@@ -299,15 +300,32 @@ impl VaultStorage {
                 // Query filter (fuzzy)
                 if let Some(ref query) = filter.query {
                     let query_lower = query.to_lowercase();
-                    let matches_name = matcher.fuzzy_match(&entry.name.to_lowercase(), &query_lower).is_some();
-                    let matches_username = entry.username.as_ref()
-                        .map(|u| matcher.fuzzy_match(&u.to_lowercase(), &query_lower).is_some())
+                    let matches_name = matcher
+                        .fuzzy_match(&entry.name.to_lowercase(), &query_lower)
+                        .is_some();
+                    let matches_username = entry
+                        .username
+                        .as_ref()
+                        .map(|u| {
+                            matcher
+                                .fuzzy_match(&u.to_lowercase(), &query_lower)
+                                .is_some()
+                        })
                         .unwrap_or(false);
-                    let matches_url = entry.url.as_ref()
-                        .map(|u| matcher.fuzzy_match(&u.to_lowercase(), &query_lower).is_some())
+                    let matches_url = entry
+                        .url
+                        .as_ref()
+                        .map(|u| {
+                            matcher
+                                .fuzzy_match(&u.to_lowercase(), &query_lower)
+                                .is_some()
+                        })
                         .unwrap_or(false);
-                    let matches_tags = entry.tags.iter()
-                        .any(|t| matcher.fuzzy_match(&t.to_lowercase(), &query_lower).is_some());
+                    let matches_tags = entry.tags.iter().any(|t| {
+                        matcher
+                            .fuzzy_match(&t.to_lowercase(), &query_lower)
+                            .is_some()
+                    });
 
                     if !(matches_name || matches_username || matches_url || matches_tags) {
                         return false;
@@ -323,8 +341,7 @@ impl VaultStorage {
 
                 // Tags filter
                 if !filter.tags.is_empty() {
-                    let has_all_tags = filter.tags.iter()
-                        .all(|t| entry.tags.contains(t));
+                    let has_all_tags = filter.tags.iter().all(|t| entry.tags.contains(t));
                     if !has_all_tags {
                         return false;
                     }
@@ -350,7 +367,8 @@ impl VaultStorage {
                 // Weak passwords filter
                 if filter.weak_passwords {
                     use crate::models::PasswordStrength;
-                    let is_weak = entry.password_strength
+                    let is_weak = entry
+                        .password_strength
                         .as_ref()
                         .map(|s| *s <= PasswordStrength::Weak)
                         .unwrap_or(false);
@@ -383,7 +401,10 @@ impl VaultStorage {
     }
 
     /// Get identity by fingerprint
-    pub fn get_identity_by_fingerprint(&self, fingerprint: &str) -> StorageResult<Option<UserIdentity>> {
+    pub fn get_identity_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> StorageResult<Option<UserIdentity>> {
         let tree = self.get_tree(trees::IDENTITIES)?;
         let cipher = self.get_cipher()?;
 
@@ -424,7 +445,10 @@ impl VaultStorage {
     }
 
     /// Get shared secrets for an entry
-    pub fn get_shared_secrets_for_entry(&self, entry_id: &Uuid) -> StorageResult<Vec<SharedSecret>> {
+    pub fn get_shared_secrets_for_entry(
+        &self,
+        entry_id: &Uuid,
+    ) -> StorageResult<Vec<SharedSecret>> {
         let tree = self.get_tree(trees::SHARED_SECRETS)?;
         let cipher = self.get_cipher()?;
         let mut secrets = Vec::new();
@@ -465,7 +489,7 @@ impl VaultStorage {
         // Sort by timestamp descending
         logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         logs.truncate(limit);
-        
+
         Ok(logs)
     }
 
@@ -551,10 +575,12 @@ impl KdfParamsStorage {
 
     pub fn save(path: &Path, params: &KdfParams) -> StorageResult<()> {
         let file_path = path.join(Self::FILENAME);
-        let json = serde_json::to_string_pretty(params)
-            .map_err(|e| StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(e.to_string()))))?;
-        std::fs::write(file_path, json)
-            .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+        let json = serde_json::to_string_pretty(params).map_err(|e| {
+            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
+                e.to_string(),
+            )))
+        })?;
+        std::fs::write(file_path, json).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         Ok(())
     }
 
@@ -562,8 +588,11 @@ impl KdfParamsStorage {
         let file_path = path.join(Self::FILENAME);
         let json = std::fs::read_to_string(file_path)
             .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
-        let params: KdfParams = serde_json::from_str(&json)
-            .map_err(|e| StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(e.to_string()))))?;
+        let params: KdfParams = serde_json::from_str(&json).map_err(|e| {
+            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
+                e.to_string(),
+            )))
+        })?;
         Ok(params)
     }
 
@@ -581,7 +610,7 @@ mod tests {
     fn test_vault_create_and_open() {
         let dir = tempdir().unwrap();
         let vault_path = dir.path().join("test_vault");
-        
+
         let master_key = MasterKey::generate();
         let kdf_params = crate::crypto::KeyDeriver::generate_params();
 
@@ -592,7 +621,8 @@ mod tests {
             &master_key,
             kdf_params.clone(),
             "test-fingerprint".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Add entry
         let entry = VaultEntry::new("GitHub", crate::models::EntryType::Password)
@@ -617,7 +647,7 @@ mod tests {
     fn test_search_entries() {
         let dir = tempdir().unwrap();
         let vault_path = dir.path().join("test_vault");
-        
+
         let master_key = MasterKey::generate();
         let kdf_params = crate::crypto::KeyDeriver::generate_params();
 
@@ -627,15 +657,28 @@ mod tests {
             &master_key,
             kdf_params,
             "fp".to_string(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Add entries
-        storage.add_entry(&VaultEntry::new("GitHub", crate::models::EntryType::Password)
-            .with_tags(vec!["work".to_string()])).unwrap();
-        storage.add_entry(&VaultEntry::new("GitLab", crate::models::EntryType::Password)
-            .with_tags(vec!["personal".to_string()])).unwrap();
-        storage.add_entry(&VaultEntry::new("AWS", crate::models::EntryType::Password)
-            .with_tags(vec!["work".to_string()])).unwrap();
+        storage
+            .add_entry(
+                &VaultEntry::new("GitHub", crate::models::EntryType::Password)
+                    .with_tags(vec!["work".to_string()]),
+            )
+            .unwrap();
+        storage
+            .add_entry(
+                &VaultEntry::new("GitLab", crate::models::EntryType::Password)
+                    .with_tags(vec!["personal".to_string()]),
+            )
+            .unwrap();
+        storage
+            .add_entry(
+                &VaultEntry::new("AWS", crate::models::EntryType::Password)
+                    .with_tags(vec!["work".to_string()]),
+            )
+            .unwrap();
 
         // Search by query
         let filter = SearchFilter::new().with_query("git");

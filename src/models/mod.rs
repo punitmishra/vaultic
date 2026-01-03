@@ -260,7 +260,9 @@ impl VaultEntry {
 
     /// Check if password needs rotation
     pub fn needs_rotation(&self) -> bool {
-        if let (Some(changed_at), Some(rotation_days)) = (self.password_changed_at, self.rotation_days) {
+        if let (Some(changed_at), Some(rotation_days)) =
+            (self.password_changed_at, self.rotation_days)
+        {
             let days_since = (Utc::now() - changed_at).num_days();
             days_since >= rotation_days as i64
         } else {
@@ -270,7 +272,9 @@ impl VaultEntry {
 
     /// Days until rotation is needed
     pub fn days_until_rotation(&self) -> Option<i64> {
-        if let (Some(changed_at), Some(rotation_days)) = (self.password_changed_at, self.rotation_days) {
+        if let (Some(changed_at), Some(rotation_days)) =
+            (self.password_changed_at, self.rotation_days)
+        {
             let days_since = (Utc::now() - changed_at).num_days();
             Some(rotation_days as i64 - days_since)
         } else {
@@ -310,7 +314,7 @@ impl Default for KdfParams {
     fn default() -> Self {
         Self {
             algorithm: "argon2id".to_string(),
-            memory_cost: 65536,  // 64 MiB
+            memory_cost: 65536, // 64 MiB
             time_cost: 3,
             parallelism: 4,
             salt: Vec::new(), // Will be generated
@@ -491,8 +495,7 @@ mod tests {
 
     #[test]
     fn test_password_history() {
-        let mut entry = VaultEntry::new("Test", EntryType::Password)
-            .with_password("password1");
+        let mut entry = VaultEntry::new("Test", EntryType::Password).with_password("password1");
 
         // Change password - should save old one to history
         entry.set_password("password2");
@@ -510,8 +513,7 @@ mod tests {
 
     #[test]
     fn test_password_history_limit() {
-        let mut entry = VaultEntry::new("Test", EntryType::Password)
-            .with_password("password0");
+        let mut entry = VaultEntry::new("Test", EntryType::Password).with_password("password0");
 
         // Add more than MAX_PASSWORD_HISTORY passwords
         for i in 1..=7 {
@@ -525,8 +527,7 @@ mod tests {
 
     #[test]
     fn test_password_restore() {
-        let mut entry = VaultEntry::new("Test", EntryType::Password)
-            .with_password("old_password");
+        let mut entry = VaultEntry::new("Test", EntryType::Password).with_password("old_password");
         entry.set_password("new_password");
 
         // Restore old password
@@ -565,7 +566,10 @@ mod tests {
         entry.notes = Some(SensitiveString::new("This is a secure note"));
 
         assert!(entry.notes.is_some());
-        assert_eq!(entry.notes.as_ref().unwrap().expose(), "This is a secure note");
+        assert_eq!(
+            entry.notes.as_ref().unwrap().expose(),
+            "This is a secure note"
+        );
     }
 
     #[test]
