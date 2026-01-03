@@ -115,6 +115,10 @@ pub enum Commands {
         /// Folder
         #[arg(short, long)]
         folder: Option<String>,
+
+        /// Mark as favorite
+        #[arg(long)]
+        favorite: bool,
     },
 
     /// Get/show an entry
@@ -290,6 +294,17 @@ pub enum Commands {
 
     /// Show vault status and statistics
     Status,
+
+    /// Vault health check and security audit
+    Health {
+        /// Show detailed analysis
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Check against Have I Been Pwned (requires internet)
+        #[arg(long)]
+        check_breaches: bool,
+    },
 
     /// Open interactive TUI mode
     Tui,
@@ -702,6 +717,15 @@ fn copy_to_clipboard_internal(text: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+/// Simple hash for password reuse detection (not cryptographic)
+fn md5_hash(input: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Copy to clipboard with auto-clear
 pub fn copy_to_clipboard(text: &str, clear_seconds: u64) -> io::Result<()> {
     copy_to_clipboard_internal(text)
@@ -931,7 +955,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Add { name, r#type, username, password, generate, length, url, tags, folder } => {
+        Commands::Add { name, r#type, username, password, generate, length, url, tags, folder, favorite } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
             let (vault_path, master_key) = session_mgr.load()
@@ -982,6 +1006,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_default();
             entry = entry.with_tags(tag_list);
             entry.folder = folder;
+            entry.favorite = favorite;
 
             // Save to vault
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
@@ -1238,6 +1263,166 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Output::field("Status", "No vault found");
                 Output::info("Run 'vaultic init <name>' to create a vault");
                 println!();
+            }
+            Ok(())
+        }
+
+        Commands::Health { verbose, check_breaches } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (_, master_key) = session_mgr.load()?;
+
+            let vault_path = default_vault_path(&cli.vault);
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            let entries = storage.list_entries()?;
+
+            if entries.is_empty() {
+                Output::info("No entries in vault to analyze.");
+                return Ok(());
+            }
+
+            println!();
+            Output::header("Vault Health Report");
+            println!();
+
+            let mut weak_passwords = Vec::new();
+            let mut reused_passwords: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            let mut old_passwords = Vec::new();
+            let mut no_password = Vec::new();
+            let total = entries.len();
+            let now = chrono::Utc::now();
+            let ninety_days_ago = now - chrono::Duration::days(90);
+
+            for entry in &entries {
+                // Check for missing passwords
+                if entry.password.is_none() {
+                    no_password.push(entry.name.clone());
+                    continue;
+                }
+
+                let password = entry.password.as_ref().unwrap().expose();
+
+                // Check password strength
+                let strength = crate::crypto::PasswordAnalyzer::strength(password);
+                let entropy = crate::crypto::PasswordAnalyzer::entropy(password);
+                let score = match strength {
+                    crate::models::PasswordStrength::VeryWeak => 1,
+                    crate::models::PasswordStrength::Weak => 2,
+                    crate::models::PasswordStrength::Fair => 3,
+                    crate::models::PasswordStrength::Strong => 4,
+                    crate::models::PasswordStrength::VeryStrong => 5,
+                };
+                if score < 3 || password.len() < 12 {
+                    weak_passwords.push((entry.name.clone(), score, password.len()));
+                }
+
+                // Check for reuse
+                let hash = format!("{:x}", md5_hash(password));
+                reused_passwords.entry(hash).or_default().push(entry.name.clone());
+
+                // Check age
+                if entry.updated_at < ninety_days_ago {
+                    let days = (now - entry.updated_at).num_days();
+                    old_passwords.push((entry.name.clone(), days));
+                }
+            }
+
+            // Filter to only show reused (more than 1 entry with same password)
+            let reused: Vec<_> = reused_passwords.into_iter()
+                .filter(|(_, names)| names.len() > 1)
+                .collect();
+
+            // Calculate health score
+            let issues = weak_passwords.len() + reused.len() + old_passwords.len();
+            let score = if total == 0 { 100 } else {
+                100 - (issues * 100 / total).min(100)
+            };
+
+            let score_color = if score >= 80 { "\x1b[32m" } // Green
+                else if score >= 60 { "\x1b[33m" } // Yellow
+                else { "\x1b[31m" }; // Red
+
+            println!("  Health Score: {}{}%\x1b[0m", score_color, score);
+            println!("  Total Entries: {}", total);
+            println!();
+
+            // Weak passwords
+            if !weak_passwords.is_empty() {
+                Output::warning(&format!("{} weak passwords", weak_passwords.len()));
+                if verbose {
+                    for (name, score, len) in &weak_passwords {
+                        println!("    • {} (score: {}/5, {} chars)", name, score, len);
+                    }
+                }
+            } else {
+                Output::success("No weak passwords found");
+            }
+
+            // Reused passwords
+            if !reused.is_empty() {
+                let count: usize = reused.iter().map(|(_, n)| n.len()).sum();
+                Output::warning(&format!("{} entries share passwords ({} unique reused)", count, reused.len()));
+                if verbose {
+                    for (_, names) in &reused {
+                        println!("    • Shared by: {}", names.join(", "));
+                    }
+                }
+            } else {
+                Output::success("No reused passwords");
+            }
+
+            // Old passwords
+            if !old_passwords.is_empty() {
+                Output::warning(&format!("{} passwords older than 90 days", old_passwords.len()));
+                if verbose {
+                    for (name, days) in &old_passwords {
+                        println!("    • {} ({} days old)", name, days);
+                    }
+                }
+            } else {
+                Output::success("All passwords updated within 90 days");
+            }
+
+            // No password entries
+            if !no_password.is_empty() {
+                Output::info(&format!("{} entries without passwords (notes/cards)", no_password.len()));
+            }
+
+            // Breach check (optional)
+            if check_breaches {
+                println!();
+                Output::info("Checking passwords against Have I Been Pwned...");
+                let rt = tokio::runtime::Runtime::new()?;
+                let mut config = crate::ai::AiConfig::default();
+                config.check_breaches = true;
+                config.enable_suggestions = false;
+                let ai = crate::ai::PasswordAi::new(config);
+                let mut breached = Vec::new();
+
+                for entry in &entries {
+                    if let Some(password) = &entry.password {
+                        if let Ok(is_breached) = rt.block_on(ai.check_breach(password.expose())) {
+                            if is_breached {
+                                breached.push(entry.name.clone());
+                            }
+                        }
+                    }
+                }
+
+                if breached.is_empty() {
+                    Output::success("No breached passwords found");
+                } else {
+                    Output::error(&format!("{} passwords found in breaches!", breached.len()));
+                    for name in &breached {
+                        println!("    • {}", name);
+                    }
+                }
+            }
+
+            println!();
+            if !verbose && (weak_passwords.len() + reused.len() + old_passwords.len() > 0) {
+                Output::info("Run with --verbose for detailed breakdown");
             }
             Ok(())
         }
