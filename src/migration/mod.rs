@@ -61,14 +61,17 @@ impl VaultMigrator {
         // Verify password works with current vault
         let kdf_params = KdfParamsStorage::load(&self.vault_path)?;
         let master_key = KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
-            .map_err(|e| StorageError::Crypto(e))?;
+            .map_err(StorageError::Crypto)?;
 
         // Try to open and unlock the vault
         let mut storage = VaultStorage::open(&self.vault_path)?;
         storage.unlock(&master_key)?;
 
         let entry_count = storage.list_entries()?.len();
-        let vault_id = storage.metadata().map(|m| m.id).unwrap_or_else(Uuid::new_v4);
+        let vault_id = storage
+            .metadata()
+            .map(|m| m.id)
+            .unwrap_or_else(Uuid::new_v4);
 
         Ok(MigrationReport {
             entry_count,
@@ -96,14 +99,17 @@ impl VaultMigrator {
         // Step 1: Load existing KDF params and derive the old master key
         let kdf_params = KdfParamsStorage::load(&self.vault_path)?;
         let old_master_key = KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
-            .map_err(|e| StorageError::Crypto(e))?;
+            .map_err(StorageError::Crypto)?;
 
         // Step 2: Open and unlock the vault with old key
         let mut storage = VaultStorage::open(&self.vault_path)?;
         storage.unlock(&old_master_key)?;
 
         let entries = storage.list_entries()?;
-        let vault_id = storage.metadata().map(|m| m.id).unwrap_or_else(Uuid::new_v4);
+        let vault_id = storage
+            .metadata()
+            .map(|m| m.id)
+            .unwrap_or_else(Uuid::new_v4);
 
         // Step 3: Create backup of kdf_params.json
         let backup_path = self.backup_kdf_params()?;
@@ -114,8 +120,8 @@ impl VaultMigrator {
         let vault_key = VaultKey::from_bytes(*old_master_key.as_bytes());
 
         // Step 5: Create KEK from password and wrap the vault key
-        let kek = derive_from_password(password.as_bytes(), &kdf_params)
-            .map_err(|e| StorageError::Crypto(e))?;
+        let kek =
+            derive_from_password(password.as_bytes(), &kdf_params).map_err(StorageError::Crypto)?;
 
         let encrypted_vault_key = wrap_vault_key(
             &vault_key,
@@ -126,7 +132,7 @@ impl VaultMigrator {
             },
             Some("Master Password".to_string()),
         )
-        .map_err(|e| StorageError::Crypto(e))?;
+        .map_err(StorageError::Crypto)?;
 
         // Step 6: Create and save keyring
         let mut keyring = VaultKeyring::new(vault_id);
@@ -154,8 +160,7 @@ impl VaultMigrator {
         ));
 
         if original.exists() {
-            fs::copy(&original, &backup)
-                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+            fs::copy(&original, &backup).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         }
 
         Ok(backup)
@@ -176,7 +181,7 @@ impl VaultMigrator {
             })
             .collect();
 
-        backup_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        backup_files.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
         if let Some(latest_backup) = backup_files.first() {
             // Remove keyring
@@ -207,7 +212,10 @@ pub fn can_migrate(vault_path: impl AsRef<Path>) -> bool {
 }
 
 /// Quick helper to migrate a vault
-pub fn migrate_vault(vault_path: impl AsRef<Path>, password: &str) -> Result<MigrationReport, StorageError> {
+pub fn migrate_vault(
+    vault_path: impl AsRef<Path>,
+    password: &str,
+) -> Result<MigrationReport, StorageError> {
     let migrator = VaultMigrator::new(vault_path);
     migrator.migrate(password)
 }
@@ -221,7 +229,8 @@ mod tests {
 
     fn create_v1_vault(path: &Path, password: &str) -> (MasterKey, KdfParams) {
         let kdf_params = KeyDeriver::generate_params();
-        let master_key = KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params).unwrap();
+        let master_key =
+            KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params).unwrap();
 
         // Create vault with v1 format
         let mut storage = VaultStorage::create(

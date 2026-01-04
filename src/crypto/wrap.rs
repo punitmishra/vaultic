@@ -68,9 +68,7 @@ pub fn unwrap_vault_key(
 
     let plaintext = cipher
         .decrypt(nonce, encrypted.ciphertext.as_ref())
-        .map_err(|_| {
-            CryptoError::DecryptionFailed("Invalid key or corrupted data".to_string())
-        })?;
+        .map_err(|_| CryptoError::DecryptionFailed("Invalid key or corrupted data".to_string()))?;
 
     if plaintext.len() != 32 {
         return Err(CryptoError::InvalidKeyLength {
@@ -174,14 +172,8 @@ mod tests {
             params: params1.clone(),
         };
 
-        let encrypted = wrap_vault_key(
-            &vault_key,
-            &kek1,
-            UnlockMethod::Password,
-            method_data,
-            None,
-        )
-        .unwrap();
+        let encrypted =
+            wrap_vault_key(&vault_key, &kek1, UnlockMethod::Password, method_data, None).unwrap();
 
         // Try to unwrap with different KEK
         let params2 = KeyDeriver::generate_params();
@@ -202,10 +194,8 @@ mod tests {
         // Create recovery KEK (simulated)
         let recovery_seed = [0x42u8; 64];
         let recovery_salt = generate_salt();
-        let recovery_kek = crate::crypto::kek::derive_from_recovery_seed(
-            &recovery_seed,
-            &recovery_salt,
-        ).unwrap();
+        let recovery_kek =
+            crate::crypto::kek::derive_from_recovery_seed(&recovery_seed, &recovery_salt).unwrap();
 
         // Wrap with password
         let password_encrypted = wrap_vault_key(
@@ -282,10 +272,8 @@ mod tests {
         // New KEK (e.g., adding recovery key)
         let recovery_salt = generate_salt();
         let recovery_seed = [0x99u8; 64];
-        let new_kek = crate::crypto::kek::derive_from_recovery_seed(
-            &recovery_seed,
-            &recovery_salt,
-        ).unwrap();
+        let new_kek =
+            crate::crypto::kek::derive_from_recovery_seed(&recovery_seed, &recovery_salt).unwrap();
 
         // Re-wrap for new method
         let new_encrypted = rewrap_vault_key(
@@ -318,9 +306,7 @@ mod tests {
             &vault_key,
             &kek,
             UnlockMethod::Password,
-            MethodData::Password {
-                params,
-            },
+            MethodData::Password { params },
             None,
         )
         .unwrap();

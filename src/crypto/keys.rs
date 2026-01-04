@@ -6,9 +6,9 @@
 //! - EncryptedVaultKey: VaultKey encrypted with a specific KEK
 //! - VaultKeyring: Collection of all unlock methods for a vault
 
+use chacha20poly1305::aead::OsRng;
 use chrono::{DateTime, Utc};
 use rand::RngCore;
-use chacha20poly1305::aead::OsRng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -119,7 +119,9 @@ impl std::fmt::Display for UnlockMethod {
                 write!(f, "YubiKey {} (slot {})", serial, slot)
             }
             UnlockMethod::Passkey { .. } => write!(f, "Passkey"),
-            UnlockMethod::GpgKey { key_id } => write!(f, "GPG Key {}", &key_id[..8.min(key_id.len())]),
+            UnlockMethod::GpgKey { key_id } => {
+                write!(f, "GPG Key {}", &key_id[..8.min(key_id.len())])
+            }
         }
     }
 }
@@ -152,10 +154,7 @@ pub enum MethodData {
         rp_id: String,
     },
     /// GPG method: key identification
-    Gpg {
-        key_id: String,
-        fingerprint: String,
-    },
+    Gpg { key_id: String, fingerprint: String },
 }
 
 /// Encrypted vault key with metadata about the encryption method
@@ -284,18 +283,25 @@ impl VaultKeyring {
 
     /// Check if password method is configured
     pub fn has_password(&self) -> bool {
-        self.keys.iter().any(|k| matches!(k.method, UnlockMethod::Password))
+        self.keys
+            .iter()
+            .any(|k| matches!(k.method, UnlockMethod::Password))
     }
 
     /// Check if recovery key is configured
     pub fn has_recovery(&self) -> bool {
-        self.keys.iter().any(|k| matches!(k.method, UnlockMethod::RecoveryKey))
+        self.keys
+            .iter()
+            .any(|k| matches!(k.method, UnlockMethod::RecoveryKey))
     }
 
     /// Check if any hardware key is configured
     pub fn has_hardware_key(&self) -> bool {
         self.keys.iter().any(|k| {
-            matches!(k.method, UnlockMethod::YubiKey { .. } | UnlockMethod::Passkey { .. })
+            matches!(
+                k.method,
+                UnlockMethod::YubiKey { .. } | UnlockMethod::Passkey { .. }
+            )
         })
     }
 
@@ -349,7 +355,11 @@ mod tests {
         assert_eq!(UnlockMethod::Password.to_string(), "Password");
         assert_eq!(UnlockMethod::RecoveryKey.to_string(), "Recovery Key");
         assert_eq!(
-            UnlockMethod::YubiKey { serial: 12345678, slot: 2 }.to_string(),
+            UnlockMethod::YubiKey {
+                serial: 12345678,
+                slot: 2
+            }
+            .to_string(),
             "YubiKey 12345678 (slot 2)"
         );
     }

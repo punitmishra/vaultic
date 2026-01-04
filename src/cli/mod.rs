@@ -2453,7 +2453,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::UnlockMethod { command } => {
             let vault_path = default_vault_path(&cli.vault);
 
-            use crate::storage::keyring::{KeyringStorage, VaultVersion, detect_vault_version};
+            use crate::storage::keyring::{detect_vault_version, KeyringStorage, VaultVersion};
 
             // Check vault version
             let version = detect_vault_version(&vault_path);
@@ -2485,7 +2485,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         for key in keyring.list_methods() {
                             let method_str = key.method.to_string();
                             let label = key.label.as_deref().unwrap_or("-");
-                            let last_used = key.last_used
+                            let last_used = key
+                                .last_used
                                 .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
                                 .unwrap_or_else(|| "never".to_string());
 
@@ -2502,33 +2503,38 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     Output::field("Total methods", &keyring.method_count().to_string());
                 }
 
-                UnlockMethodCommands::Add { method, label: _, password: _ } => {
-                    match method {
-                        UnlockMethodType::Password => {
-                            Output::info("Password method is configured during 'vaultic init' or 'vaultic migrate'");
-                        }
-                        UnlockMethodType::Recovery => {
-                            Output::warning("Recovery key generation will be implemented in Phase 2");
-                            Output::info("Coming soon: vaultic recovery generate");
-                        }
-                        UnlockMethodType::Yubikey => {
-                            Output::warning("YubiKey setup will be implemented in Phase 3");
-                            Output::info("Coming soon: vaultic setup hardware");
-                        }
-                        UnlockMethodType::Gpg => {
-                            Output::warning("GPG unlock method will be implemented in Phase 5");
-                            Output::info("Coming soon: vaultic unlock-method add gpg --key-id <KEY>");
-                        }
+                UnlockMethodCommands::Add {
+                    method,
+                    label: _,
+                    password: _,
+                } => match method {
+                    UnlockMethodType::Password => {
+                        Output::info("Password method is configured during 'vaultic init' or 'vaultic migrate'");
                     }
-                }
+                    UnlockMethodType::Recovery => {
+                        Output::warning("Recovery key generation will be implemented in Phase 2");
+                        Output::info("Coming soon: vaultic recovery generate");
+                    }
+                    UnlockMethodType::Yubikey => {
+                        Output::warning("YubiKey setup will be implemented in Phase 3");
+                        Output::info("Coming soon: vaultic setup hardware");
+                    }
+                    UnlockMethodType::Gpg => {
+                        Output::warning("GPG unlock method will be implemented in Phase 5");
+                        Output::info("Coming soon: vaultic unlock-method add gpg --key-id <KEY>");
+                    }
+                },
 
                 UnlockMethodCommands::Remove { id, password: _ } => {
-                    Output::warning(&format!("Remove unlock method '{}' - to be implemented", id));
+                    Output::warning(&format!(
+                        "Remove unlock method '{}' - to be implemented",
+                        id
+                    ));
                     Output::info("This will require master password verification");
                 }
 
                 UnlockMethodCommands::Test { method } => {
-                    Output::info(&format!("Testing {} unlock method...", method.to_string()));
+                    Output::info(&format!("Testing {} unlock method...", method));
                     Output::warning("Test functionality will be implemented with each method");
                 }
             }
@@ -2539,19 +2545,25 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Recovery { command } => {
             let vault_path = default_vault_path(&cli.vault);
 
-            use crate::recovery::RecoveryKey;
-            use crate::storage::keyring::{KeyringStorage, VaultVersion, detect_vault_version};
-            use crate::storage::KdfParamsStorage;
-            use crate::crypto::wrap::unwrap_vault_key;
             use crate::crypto::keys::UnlockMethod;
+            use crate::crypto::wrap::unwrap_vault_key;
             use crate::crypto::MasterKey;
+            use crate::recovery::RecoveryKey;
+            use crate::storage::keyring::{detect_vault_version, KeyringStorage, VaultVersion};
+            use crate::storage::KdfParamsStorage;
 
             match command {
-                RecoveryCommands::Generate { qr, label, password } => {
+                RecoveryCommands::Generate {
+                    qr,
+                    label,
+                    password,
+                } => {
                     // Check vault version
                     let version = detect_vault_version(&vault_path);
                     if version == VaultVersion::V1 {
-                        Output::error("This vault uses the v1 format. Run 'vaultic migrate' first.");
+                        Output::error(
+                            "This vault uses the v1 format. Run 'vaultic migrate' first.",
+                        );
                         return Ok(());
                     }
                     if version == VaultVersion::Unknown {
@@ -2565,7 +2577,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     if keyring.has_recovery() {
                         Output::warning("A recovery key is already configured for this vault.");
-                        if !Prompts::confirm("Do you want to replace it with a new recovery key?", false)? {
+                        if !Prompts::confirm(
+                            "Do you want to replace it with a new recovery key?",
+                            false,
+                        )? {
                             return Ok(());
                         }
                         // Remove old recovery key
@@ -2605,7 +2620,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     Output::header("Recovery Key Generated");
                     println!();
-                    Output::warning("⚠️  IMPORTANT: Write down these 24 words and store them safely!");
+                    Output::warning(
+                        "⚠️  IMPORTANT: Write down these 24 words and store them safely!",
+                    );
                     Output::warning("⚠️  This is the ONLY way to recover your vault if you forget your password.");
                     Output::warning("⚠️  Anyone with these words can access your vault!");
                     println!();
@@ -2623,7 +2640,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     // Wrap vault key with recovery key
                     let recovery_label = label.unwrap_or_else(|| "Recovery Key".to_string());
-                    let (encrypted_key, _salt) = recovery_key.wrap_vault_key(&vault_key, Some(recovery_label))?;
+                    let (encrypted_key, _salt) =
+                        recovery_key.wrap_vault_key(&vault_key, Some(recovery_label))?;
 
                     // Add to keyring and save
                     keyring.add_key(encrypted_key);
@@ -2661,8 +2679,14 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             if version == VaultVersion::V2 {
                                 let keyring_storage = KeyringStorage::new(&vault_path);
                                 if let Ok(keyring) = keyring_storage.load() {
-                                    if let Some(configured) = keyring.find_by_method(&UnlockMethod::RecoveryKey) {
-                                        if let crate::crypto::keys::MethodData::Recovery { fingerprint, .. } = &configured.method_data {
+                                    if let Some(configured) =
+                                        keyring.find_by_method(&UnlockMethod::RecoveryKey)
+                                    {
+                                        if let crate::crypto::keys::MethodData::Recovery {
+                                            fingerprint,
+                                            ..
+                                        } = &configured.method_data
+                                        {
                                             if *fingerprint == recovery_key.fingerprint() {
                                                 println!();
                                                 Output::success("✓ This recovery key matches the configured vault recovery key!");
@@ -2701,12 +2725,20 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(label) = &recovery.label {
                             println!("  Label:       {}", label);
                         }
-                        if let crate::crypto::keys::MethodData::Recovery { fingerprint, .. } = &recovery.method_data {
+                        if let crate::crypto::keys::MethodData::Recovery { fingerprint, .. } =
+                            &recovery.method_data
+                        {
                             println!("  Fingerprint: {} ...", fingerprint);
                         }
-                        println!("  Created:     {}", recovery.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
+                        println!(
+                            "  Created:     {}",
+                            recovery.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+                        );
                         if let Some(last_used) = recovery.last_used {
-                            println!("  Last used:   {}", last_used.format("%Y-%m-%d %H:%M:%S UTC"));
+                            println!(
+                                "  Last used:   {}",
+                                last_used.format("%Y-%m-%d %H:%M:%S UTC")
+                            );
                         } else {
                             println!("  Last used:   Never");
                         }
@@ -2730,14 +2762,15 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let mut keyring = keyring_storage.load()?;
 
                     // Check if recovery key is configured
-                    let recovery_encrypted = match keyring.find_by_method(&UnlockMethod::RecoveryKey) {
-                        Some(key) => key,
-                        None => {
-                            Output::error("No recovery key configured for this vault.");
-                            Output::info("Run 'vaultic recovery generate' to create one.");
-                            return Ok(());
-                        }
-                    };
+                    let recovery_encrypted =
+                        match keyring.find_by_method(&UnlockMethod::RecoveryKey) {
+                            Some(key) => key,
+                            None => {
+                                Output::error("No recovery key configured for this vault.");
+                                Output::info("Run 'vaultic recovery generate' to create one.");
+                                return Ok(());
+                            }
+                        };
 
                     // Get recovery phrase
                     let recovery_phrase = if let Some(p) = phrase {
@@ -2753,17 +2786,22 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let recovery_key = RecoveryKey::from_phrase(&recovery_phrase)?;
 
                     // Get salt from method data
-                    let salt = if let crate::crypto::keys::MethodData::Recovery { salt, fingerprint } = &recovery_encrypted.method_data {
-                        // Verify fingerprint matches
-                        if *fingerprint != recovery_key.fingerprint() {
-                            Output::error("Recovery phrase does not match the configured recovery key.");
+                    let salt =
+                        if let crate::crypto::keys::MethodData::Recovery { salt, fingerprint } =
+                            &recovery_encrypted.method_data
+                        {
+                            // Verify fingerprint matches
+                            if *fingerprint != recovery_key.fingerprint() {
+                                Output::error(
+                                    "Recovery phrase does not match the configured recovery key.",
+                                );
+                                return Ok(());
+                            }
+                            salt.clone()
+                        } else {
+                            Output::error("Invalid recovery key data format");
                             return Ok(());
-                        }
-                        salt.clone()
-                    } else {
-                        Output::error("Invalid recovery key data format");
-                        return Ok(());
-                    };
+                        };
 
                     let kek = recovery_key.derive_kek(&salt)?;
 
@@ -2784,7 +2822,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     session_mgr.create(&vault_path, &master_key, timeout)?;
 
                     // Update last_used timestamp
-                    if let Some(recovery_mut) = keyring.find_by_method_mut(&UnlockMethod::RecoveryKey) {
+                    if let Some(recovery_mut) =
+                        keyring.find_by_method_mut(&UnlockMethod::RecoveryKey)
+                    {
                         recovery_mut.mark_used();
                         keyring_storage.save(&keyring)?;
                     }

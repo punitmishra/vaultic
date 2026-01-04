@@ -49,14 +49,12 @@ impl KeyringStorage {
 
         // Create parent directories if they don't exist
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+            fs::create_dir_all(parent).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         }
 
         // Write atomically using a temp file
         let temp_path = self.path.with_extension("json.tmp");
-        fs::write(&temp_path, &json)
-            .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+        fs::write(&temp_path, &json).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         fs::rename(&temp_path, &self.path)
             .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
 
@@ -80,8 +78,7 @@ impl KeyringStorage {
     /// Delete the keyring file (for vault reset)
     pub fn delete(&self) -> Result<(), StorageError> {
         if self.path.exists() {
-            fs::remove_file(&self.path)
-                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+            fs::remove_file(&self.path).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         }
         Ok(())
     }

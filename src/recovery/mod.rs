@@ -16,7 +16,9 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
 use crate::crypto::kek::derive_from_recovery_seed;
-use crate::crypto::keys::{EncryptedVaultKey, KeyEncryptionKey, MethodData, UnlockMethod, VaultKey};
+use crate::crypto::keys::{
+    EncryptedVaultKey, KeyEncryptionKey, MethodData, UnlockMethod, VaultKey,
+};
 use crate::crypto::wrap::{generate_salt, wrap_vault_key};
 use crate::crypto::CryptoError;
 
@@ -36,8 +38,9 @@ impl RecoveryKey {
         let mut entropy = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut entropy);
 
-        let mnemonic = Mnemonic::from_entropy(&entropy)
-            .map_err(|e| CryptoError::KeyDerivationFailed(format!("Failed to generate mnemonic: {}", e)))?;
+        let mnemonic = Mnemonic::from_entropy(&entropy).map_err(|e| {
+            CryptoError::KeyDerivationFailed(format!("Failed to generate mnemonic: {}", e))
+        })?;
 
         // Derive seed using empty passphrase (standard BIP39)
         let seed_bytes = mnemonic.to_seed("");
@@ -49,8 +52,9 @@ impl RecoveryKey {
 
     /// Create a recovery key from an existing mnemonic phrase
     pub fn from_phrase(phrase: &str) -> Result<Self, CryptoError> {
-        let mnemonic = Mnemonic::parse_normalized(phrase)
-            .map_err(|e| CryptoError::KeyDerivationFailed(format!("Invalid mnemonic phrase: {}", e)))?;
+        let mnemonic = Mnemonic::parse_normalized(phrase).map_err(|e| {
+            CryptoError::KeyDerivationFailed(format!("Invalid mnemonic phrase: {}", e))
+        })?;
 
         let seed_bytes = mnemonic.to_seed("");
         let mut seed = [0u8; 64];
@@ -140,7 +144,10 @@ impl RecoveryKey {
         }
 
         output.push_str("╠══════════════════════════════════════════════════════════╣\n");
-        output.push_str(&format!("║  Checksum: {}                                          ║\n", self.checksum()));
+        output.push_str(&format!(
+            "║  Checksum: {}                                          ║\n",
+            self.checksum()
+        ));
         output.push_str("╚══════════════════════════════════════════════════════════╝\n");
 
         output
@@ -149,8 +156,9 @@ impl RecoveryKey {
     /// Generate a QR code containing the recovery phrase
     /// Returns a string representation for terminal display
     pub fn generate_qr(&self) -> Result<String, CryptoError> {
-        let code = QrCode::new(self.phrase().as_bytes())
-            .map_err(|e| CryptoError::KeyDerivationFailed(format!("Failed to generate QR code: {}", e)))?;
+        let code = QrCode::new(self.phrase().as_bytes()).map_err(|e| {
+            CryptoError::KeyDerivationFailed(format!("Failed to generate QR code: {}", e))
+        })?;
 
         Ok(render_qr_to_terminal(&code))
     }
@@ -341,7 +349,9 @@ mod tests {
         let recovery_key = RecoveryKey::generate().unwrap();
         let vault_key = VaultKey::generate();
 
-        let (encrypted, salt) = recovery_key.wrap_vault_key(&vault_key, Some("Test Recovery".to_string())).unwrap();
+        let (encrypted, salt) = recovery_key
+            .wrap_vault_key(&vault_key, Some("Test Recovery".to_string()))
+            .unwrap();
 
         assert_eq!(encrypted.method, UnlockMethod::RecoveryKey);
         assert_eq!(encrypted.label, Some("Test Recovery".to_string()));
@@ -415,7 +425,10 @@ mod tests {
         let debug = format!("{:?}", key);
 
         // Should NOT contain the full phrase
-        assert!(!debug.contains(&key.phrase()), "Debug output contains full mnemonic phrase");
+        assert!(
+            !debug.contains(&key.phrase()),
+            "Debug output contains full mnemonic phrase"
+        );
 
         // Should contain fingerprint (first 4 words are OK to show for identification)
         assert!(debug.contains(&key.fingerprint()));
