@@ -47,12 +47,21 @@ jobs:
         run: cargo build --release
 
   build-features:
-    name: Build with features
+    name: Build with features (${{ matrix.features || 'default' }})
     runs-on: ubuntu-latest
     needs: test
     strategy:
+      fail-fast: false
       matrix:
-        features: ["", "fido2", "gpg", "fido2,gpg"]
+        include:
+          - features: ""
+            name: "default"
+          - features: "fido2"
+            name: "fido2"
+          - features: "gpg"
+            name: "gpg"
+          - features: "fido2,gpg"
+            name: "all"
     steps:
       - uses: actions/checkout@v4
 
@@ -73,8 +82,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-features-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-cargo-${{ matrix.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.name }}-
+            ${{ runner.os }}-cargo-
 
       - name: Build with features
         run: |
