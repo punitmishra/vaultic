@@ -357,6 +357,24 @@ pub enum Commands {
         #[command(subcommand)]
         command: CredentialCommands,
     },
+
+    /// Migrate vault from v1 to v2 format (multi-method unlock)
+    Migrate {
+        /// Preview migration without making changes
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Master password (for non-interactive use)
+        #[arg(long, env = "VAULTIC_PASSWORD", hide = true)]
+        password: Option<String>,
+    },
+
+    /// Manage unlock methods (password, recovery key, hardware key)
+    #[command(name = "unlock-method")]
+    UnlockMethod {
+        #[command(subcommand)]
+        command: UnlockMethodCommands,
+    },
 }
 
 /// Batch operation subcommands
@@ -466,6 +484,68 @@ pub enum IdentityCommands {
 
     /// Export your public identity
     Export,
+}
+
+/// Unlock method management subcommands
+#[derive(Subcommand)]
+pub enum UnlockMethodCommands {
+    /// List all configured unlock methods
+    List,
+
+    /// Add a new unlock method
+    Add {
+        /// Method type to add
+        #[arg(value_enum)]
+        method: UnlockMethodType,
+
+        /// Label for this unlock method
+        #[arg(short, long)]
+        label: Option<String>,
+
+        /// Master password (for non-interactive use)
+        #[arg(long, env = "VAULTIC_PASSWORD", hide = true)]
+        password: Option<String>,
+    },
+
+    /// Remove an unlock method
+    Remove {
+        /// Method ID or label to remove
+        id: String,
+
+        /// Master password (for non-interactive use)
+        #[arg(long, env = "VAULTIC_PASSWORD", hide = true)]
+        password: Option<String>,
+    },
+
+    /// Test an unlock method
+    Test {
+        /// Method type to test
+        #[arg(value_enum)]
+        method: UnlockMethodType,
+    },
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum UnlockMethodType {
+    /// Master password (Argon2id)
+    Password,
+    /// BIP39 24-word recovery key
+    Recovery,
+    /// YubiKey HMAC-SHA1
+    Yubikey,
+    /// GPG/OpenPGP key
+    Gpg,
+}
+
+impl std::fmt::Display for UnlockMethodType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnlockMethodType::Password => write!(f, "password"),
+            UnlockMethodType::Recovery => write!(f, "recovery"),
+            UnlockMethodType::Yubikey => write!(f, "yubikey"),
+            UnlockMethodType::Gpg => write!(f, "gpg"),
+        }
+    }
 }
 
 #[derive(Clone, ValueEnum)]
@@ -2238,6 +2318,178 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     Ok(())
                 }
             }
+        }
+
+        Commands::Migrate { dry_run, password } => {
+            let vault_path = default_vault_path(&cli.vault);
+
+            use crate::migration::VaultMigrator;
+            use crate::storage::keyring::VaultVersion;
+
+            let migrator = VaultMigrator::new(&vault_path);
+
+            // Check if migration is needed
+            if !migrator.needs_migration() {
+                let version = migrator.current_version();
+                match version {
+                    VaultVersion::V2 => {
+                        Output::info("Vault is already using v2 format (multi-method unlock)");
+                        return Ok(());
+                    }
+                    VaultVersion::Unknown => {
+                        Output::error("Not a valid vault directory");
+                        return Ok(());
+                    }
+                    VaultVersion::V1 => {
+                        // Should not happen since needs_migration returned false
+                        Output::error("Unexpected vault state");
+                        return Ok(());
+                    }
+                }
+            }
+
+            Output::header("Vault Migration v1 → v2");
+            Output::info("This will upgrade your vault to support multiple unlock methods");
+            Output::info("(password, recovery key, YubiKey, GPG)");
+            println!();
+
+            // Get password
+            let password = match password {
+                Some(p) => p,
+                None => Prompts::master_password(false)?,
+            };
+
+            if dry_run {
+                let spinner = Output::spinner("Checking migration compatibility...");
+                match migrator.dry_run(&password) {
+                    Ok(report) => {
+                        spinner.finish_with_message("Compatible".green().to_string());
+                        println!();
+                        Output::field("Entries", &report.entry_count.to_string());
+                        Output::field("Vault ID", &report.vault_id.to_string());
+                        Output::info("Run without --dry-run to perform the migration");
+                    }
+                    Err(e) => {
+                        spinner.finish_with_message("Failed".red().to_string());
+                        Output::error(&format!("Migration check failed: {}", e));
+                    }
+                }
+            } else {
+                // Confirm migration
+                if !Prompts::confirm("Proceed with migration?", true)? {
+                    Output::info("Migration cancelled");
+                    return Ok(());
+                }
+
+                let spinner = Output::spinner("Migrating vault...");
+                match migrator.migrate(&password) {
+                    Ok(report) => {
+                        spinner.finish_with_message("Complete".green().to_string());
+                        println!();
+                        Output::success("Vault migrated to v2 format!");
+                        Output::field("Entries", &report.entry_count.to_string());
+                        if let Some(backup_path) = &report.backup_path {
+                            Output::field("Backup", &backup_path.display().to_string());
+                        }
+                        println!();
+                        Output::info("You can now add additional unlock methods with:");
+                        Output::info("  vaultic unlock-method add recovery");
+                        Output::info("  vaultic unlock-method add yubikey");
+                    }
+                    Err(e) => {
+                        spinner.finish_with_message("Failed".red().to_string());
+                        Output::error(&format!("Migration failed: {}", e));
+                    }
+                }
+            }
+
+            Ok(())
+        }
+
+        Commands::UnlockMethod { command } => {
+            let vault_path = default_vault_path(&cli.vault);
+
+            use crate::storage::keyring::{KeyringStorage, VaultVersion, detect_vault_version};
+
+            // Check vault version
+            let version = detect_vault_version(&vault_path);
+            if version == VaultVersion::V1 {
+                Output::error("This vault uses the v1 format. Run 'vaultic migrate' first.");
+                return Ok(());
+            }
+            if version == VaultVersion::Unknown {
+                Output::error("Not a valid vault directory");
+                return Ok(());
+            }
+
+            match command {
+                UnlockMethodCommands::List => {
+                    let keyring_storage = KeyringStorage::new(&vault_path);
+                    if !keyring_storage.exists() {
+                        Output::error("No keyring found. Run 'vaultic migrate' first.");
+                        return Ok(());
+                    }
+
+                    let keyring = keyring_storage.load()?;
+
+                    Output::header("Configured Unlock Methods");
+                    println!();
+
+                    if keyring.keys.is_empty() {
+                        Output::info("No unlock methods configured");
+                    } else {
+                        for key in keyring.list_methods() {
+                            let method_str = key.method.to_string();
+                            let label = key.label.as_deref().unwrap_or("-");
+                            let last_used = key.last_used
+                                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                                .unwrap_or_else(|| "never".to_string());
+
+                            println!(
+                                "  {} {} ({}) - Last used: {}",
+                                "•".bright_blue(),
+                                method_str.bright_white(),
+                                label.dimmed(),
+                                last_used.dimmed()
+                            );
+                        }
+                    }
+                    println!();
+                    Output::field("Total methods", &keyring.method_count().to_string());
+                }
+
+                UnlockMethodCommands::Add { method, label: _, password: _ } => {
+                    match method {
+                        UnlockMethodType::Password => {
+                            Output::info("Password method is configured during 'vaultic init' or 'vaultic migrate'");
+                        }
+                        UnlockMethodType::Recovery => {
+                            Output::warning("Recovery key generation will be implemented in Phase 2");
+                            Output::info("Coming soon: vaultic recovery generate");
+                        }
+                        UnlockMethodType::Yubikey => {
+                            Output::warning("YubiKey setup will be implemented in Phase 3");
+                            Output::info("Coming soon: vaultic setup hardware");
+                        }
+                        UnlockMethodType::Gpg => {
+                            Output::warning("GPG unlock method will be implemented in Phase 5");
+                            Output::info("Coming soon: vaultic unlock-method add gpg --key-id <KEY>");
+                        }
+                    }
+                }
+
+                UnlockMethodCommands::Remove { id, password: _ } => {
+                    Output::warning(&format!("Remove unlock method '{}' - to be implemented", id));
+                    Output::info("This will require master password verification");
+                }
+
+                UnlockMethodCommands::Test { method } => {
+                    Output::info(&format!("Testing {} unlock method...", method.to_string()));
+                    Output::warning("Test functionality will be implemented with each method");
+                }
+            }
+
+            Ok(())
         }
     }
 }

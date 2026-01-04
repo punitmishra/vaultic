@@ -10,10 +10,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::crypto::kek::derive_from_password;
-use crate::crypto::keys::{EncryptedVaultKey, MethodData, UnlockMethod, VaultKey, VaultKeyring};
-use crate::crypto::wrap::{generate_salt, wrap_vault_key};
-use crate::crypto::{Cipher, KeyDeriver, MasterKey};
-use crate::models::KdfParams;
+use crate::crypto::keys::{MethodData, UnlockMethod, VaultKey, VaultKeyring};
+use crate::crypto::wrap::wrap_vault_key;
+use crate::crypto::KeyDeriver;
 use crate::storage::keyring::{detect_vault_version, KeyringStorage, VaultVersion};
 use crate::storage::{KdfParamsStorage, StorageError, VaultStorage};
 
@@ -216,6 +215,8 @@ pub fn migrate_vault(vault_path: impl AsRef<Path>, password: &str) -> Result<Mig
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::MasterKey;
+    use crate::models::KdfParams;
     use tempfile::tempdir;
 
     fn create_v1_vault(path: &Path, password: &str) -> (MasterKey, KdfParams) {

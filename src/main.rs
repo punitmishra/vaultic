@@ -22,6 +22,7 @@ mod fido2;
 #[cfg(feature = "gpg")]
 mod gpg;
 mod import;
+mod migration;
 mod models;
 mod session;
 mod sharing;
