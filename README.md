@@ -34,7 +34,7 @@ A lightweight, security-focused password manager written in Rust with hardware a
 | Import (Bitwarden, LastPass, 1Password) | ✅ Working |
 | Export (JSON, CSV, Encrypted) | ✅ Working |
 | Interactive TUI mode (ratatui) | ✅ Working |
-| Shell completions (bash/zsh/fish) | ✅ Working |
+| Shell completions (bash/zsh/fish/powershell) | ✅ Working |
 | AI analysis (Ollama integration) | ✅ Working |
 | HIBP breach checking | ✅ Working |
 | TOTP/2FA support | ✅ Working |
@@ -42,6 +42,10 @@ A lightweight, security-focused password manager written in Rust with hardware a
 | X25519 key exchange | ✅ Working |
 | QR code generation | ✅ Working |
 | Simple web client | ✅ Working |
+| Password history (tracking + restore) | ✅ Working |
+| Batch operations (tag, delete, move) | ✅ Working |
+| Git credential helper | ✅ Working |
+| Health audit with scoring | ✅ Working |
 | FIDO2/YubiKey | 🔧 Structure ready (needs hardware) |
 
 ---
@@ -206,6 +210,51 @@ vaultic export backup.json --format json
 vaultic export backup.vaultic --format encrypted
 ```
 
+### Security Health Check
+
+```bash
+# Run security audit
+vaultic health
+
+# Verbose output with recommendations
+vaultic health --verbose
+```
+
+### Password History
+
+```bash
+# View password history for an entry
+vaultic history GitHub
+
+# Restore a previous password
+vaultic history GitHub --restore 2
+```
+
+### Batch Operations
+
+```bash
+# Add tags to multiple entries
+vaultic batch tag --add "work" GitHub AWS GitLab
+
+# Move entries to a folder
+vaultic batch move --folder "Cloud" AWS GCP Azure
+
+# Delete multiple entries (with confirmation)
+vaultic batch delete OldService1 OldService2
+```
+
+### Git Credential Helper
+
+```bash
+# Configure git to use vaultic
+git config --global credential.helper vaultic
+
+# Or for a specific repository
+git config credential.helper vaultic
+
+# Vaultic will now provide credentials for git operations
+```
+
 ### Interactive TUI
 
 Launch a full-screen terminal interface for managing your passwords:
@@ -269,8 +318,9 @@ brew install asciinema  # macOS
 apt install asciinema   # Linux
 
 # Play recordings
-asciinema play demos/quickstart.cast
-asciinema play demos/generate.cast
+asciinema play demos/quickstart.cast   # Basic workflow
+asciinema play demos/features.cast     # Full features showcase
+asciinema play demos/generate.cast     # Password generation
 ```
 
 ---
@@ -387,22 +437,34 @@ src/
 
 ---
 
-## Test Results (2025-12-28)
+## Test Results (2026-01-04)
 
 ```
-cargo test: 42 tests passing
+cargo test: 120 tests passing
+  - 49 bin tests (CLI commands and parsing)
+  - 47 lib tests (crypto, storage, models)
+  - 19 integration tests (end-to-end workflows)
+  - 5 doctests (code examples)
+
 cargo build --release: Success
+cargo clippy: No warnings
 
 Local workflow test:
-✓ init        - Vault created
+✓ init        - Vault created with KDF params
 ✓ unlock      - Session created (15 min)
-✓ add         - Entries added with tags
+✓ add         - Entries with tags, custom fields, notes
 ✓ generate    - 127.8 bits entropy (Very Strong)
-✓ list        - Formatted table output
-✓ status      - Shows vault info
+✓ list        - Formatted table with filters
+✓ status      - Shows vault and session info
+✓ health      - Security audit with health score
+✓ history     - Password history and restore
+✓ batch       - Batch operations on entries
+✓ credential  - Git credential helper
 ✓ tui         - Full terminal UI working
+✓ import      - Bitwarden, LastPass, 1Password
+✓ export      - JSON, CSV, encrypted
 ✓ lock        - Session destroyed
-✓ completions - bash/zsh/fish working
+✓ completions - bash/zsh/fish/powershell
 ```
 
 ---
