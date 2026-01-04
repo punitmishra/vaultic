@@ -9,13 +9,24 @@
 //! - **CRUD operations**: Create, read, update, delete entries
 //! - **Search**: Filter by name, tags, folder, type, and more
 //! - **Atomic operations**: Transactional updates via sled
+//! - **Multi-method unlock**: Keyring storage for v2 vaults
 //!
 //! # Storage Layout
 //!
+//! ## V1 (Legacy)
 //! ```text
 //! vault_path/
 //! ├── db/              # Sled database files
 //! ├── kdf_params.json  # Key derivation parameters (unencrypted)
+//! └── session/         # Session files (encrypted)
+//! ```
+//!
+//! ## V2 (Multi-method unlock)
+//! ```text
+//! vault_path/
+//! ├── db/              # Sled database files
+//! ├── keyring.json     # Encrypted vault keys for each unlock method
+//! ├── kdf_params.json  # Key derivation parameters (for password method)
 //! └── session/         # Session files (encrypted)
 //! ```
 //!
@@ -37,6 +48,8 @@
 //! let entry = VaultEntry::new("GitHub", EntryType::Password);
 //! storage.add_entry(&entry).unwrap();
 //! ```
+
+pub mod keyring;
 
 use std::path::{Path, PathBuf};
 

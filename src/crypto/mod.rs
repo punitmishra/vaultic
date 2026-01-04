@@ -13,6 +13,31 @@
 //! | Signatures | Ed25519 | 256-bit |
 //! | Key expansion | HKDF-SHA256 | Variable |
 //!
+//! # Key Hierarchy (v2)
+//!
+//! Vaultic v2 uses a key hierarchy that supports multiple unlock methods:
+//!
+//! ```text
+//! ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+//! │Master Password│  │Recovery Key  │  │ YubiKey/FIDO │
+//! │  (Argon2id)  │  │  (BIP39 24w) │  │   (HMAC)     │
+//! └──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+//!        │                 │                 │
+//!        ▼                 ▼                 ▼
+//! ┌─────────────────────────────────────────────────────────┐
+//! │              Key Encryption Keys (KEKs)                  │
+//! └─────────────────────────┬───────────────────────────────┘
+//!                           ▼
+//!                  ┌─────────────────┐
+//!                  │   Vault Key     │  Random 256-bit
+//!                  └────────┬────────┘
+//!                           ▼
+//!                  ┌─────────────────┐
+//!                  │  Entry Data     │
+//!                  │ XChaCha20-Poly  │
+//!                  └─────────────────┘
+//! ```
+//!
 //! # Key Derivation
 //!
 //! Passwords are processed through Argon2id with configurable parameters:
@@ -34,6 +59,11 @@
 //! let encrypted = cipher.encrypt(b"secret data").unwrap();
 //! let decrypted = cipher.decrypt(&encrypted).unwrap();
 //! ```
+
+// Key hierarchy modules (v2)
+pub mod kek;
+pub mod keys;
+pub mod wrap;
 
 use argon2::{password_hash::SaltString, Argon2, Params, Version};
 use chacha20poly1305::{
