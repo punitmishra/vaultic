@@ -95,8 +95,8 @@ pub fn export_encrypted(entries: &[VaultEntry], master_key: &MasterKey) -> Expor
         return Err(ExportError::NoEntries);
     }
 
-    let serialized = bincode::serialize(entries)
-        .map_err(|e| ExportError::Serialization(e.to_string()))?;
+    let serialized =
+        bincode::serialize(entries).map_err(|e| ExportError::Serialization(e.to_string()))?;
 
     let derived = master_key.derive_keys();
     let cipher = Cipher::new(&derived.encryption_key);
@@ -109,7 +109,10 @@ pub fn export_encrypted(entries: &[VaultEntry], master_key: &MasterKey) -> Expor
         app_version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    let backup = EncryptedBackup { metadata, encrypted_data };
+    let backup = EncryptedBackup {
+        metadata,
+        encrypted_data,
+    };
     bincode::serialize(&backup).map_err(|e| ExportError::Serialization(e.to_string()))
 }
 
@@ -157,18 +160,14 @@ mod tests {
 
     #[test]
     fn test_export_json() {
-        let entries = vec![
-            VaultEntry::new("Test", EntryType::Password).with_password("secret"),
-        ];
+        let entries = vec![VaultEntry::new("Test", EntryType::Password).with_password("secret")];
         let json = export_json(&entries).unwrap();
         assert!(json.contains("\"name\": \"Test\""));
     }
 
     #[test]
     fn test_export_csv() {
-        let entries = vec![
-            VaultEntry::new("Test", EntryType::Password).with_username("user"),
-        ];
+        let entries = vec![VaultEntry::new("Test", EntryType::Password).with_username("user")];
         let csv = export_csv(&entries).unwrap();
         assert!(csv.contains("Test,user"));
     }

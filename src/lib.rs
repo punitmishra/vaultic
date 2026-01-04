@@ -38,14 +38,19 @@
 //! vaultic suggest --analyze
 //! ```
 
-#![warn(missing_docs)]
+// TODO: Re-enable once all public items are documented
+#![allow(missing_docs)]
+// Allow unused code during development (many features are stubbed)
+#![allow(dead_code)]
 #![warn(clippy::all)]
 
 pub mod ai;
 pub mod cli;
 pub mod crypto;
 pub mod export;
+#[cfg(feature = "fido2")]
 pub mod fido2;
+#[cfg(feature = "gpg")]
 pub mod gpg;
 pub mod import;
 pub mod models;
@@ -58,7 +63,7 @@ pub mod tui;
 // Re-exports for convenience
 pub use crypto::{Cipher, MasterKey, PasswordAnalyzer, PasswordGenerator};
 pub use models::{EntryType, PasswordStrength, SensitiveString, VaultEntry, VaultMetadata};
-pub use storage::{VaultStorage, StorageError};
+pub use storage::{StorageError, VaultStorage};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -107,14 +112,9 @@ impl Default for Config {
 #[derive(Debug, Clone)]
 pub enum AiBackend {
     /// Local Ollama instance
-    Ollama {
-        url: String,
-        model: String,
-    },
+    Ollama { url: String, model: String },
     /// Local llama.cpp server
-    LlamaCpp {
-        url: String,
-    },
+    LlamaCpp { url: String },
     /// Disabled - use rule-based analysis only
     Disabled,
 }
@@ -152,9 +152,7 @@ impl VaultSession {
         }
 
         match self.unlocked_at {
-            Some(time) => {
-                time.elapsed().as_secs() > (self.config.session_timeout as u64 * 60)
-            }
+            Some(time) => time.elapsed().as_secs() > (self.config.session_timeout as u64 * 60),
             None => true,
         }
     }
@@ -198,6 +196,7 @@ pub enum VaulticError {
     Crypto(#[from] crypto::CryptoError),
 
     /// FIDO2 errors
+    #[cfg(feature = "fido2")]
     #[error("FIDO2 error: {0}")]
     Fido2(#[from] fido2::Fido2Error),
 
@@ -206,6 +205,7 @@ pub enum VaulticError {
     Sharing(#[from] sharing::SharingError),
 
     /// GPG errors
+    #[cfg(feature = "gpg")]
     #[error("GPG error: {0}")]
     Gpg(#[from] gpg::GpgError),
 

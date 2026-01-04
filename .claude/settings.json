@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(git:*)",
+      "Bash(./target/release/vaultic:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "command": "cargo build --release 2>&1 | tail -5",
+        "description": "Build vaultic on session start"
+      },
+      {
+        "command": "cargo test 2>&1 | tail -10",
+        "description": "Run tests on session start"
+      }
+    ]
+  }
+}

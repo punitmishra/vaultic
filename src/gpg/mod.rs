@@ -2,6 +2,8 @@
 //!
 //! Allows using existing GPG keys for vault encryption and identity.
 //! Uses the Sequoia PGP library for OpenPGP operations.
+//!
+//! This module is only compiled when the `gpg` feature is enabled.
 
 use std::io::Write;
 use std::path::Path;
@@ -70,10 +72,7 @@ impl GpgManager {
     }
 
     /// Generate a new GPG key
-    pub fn generate(
-        user_id: &str,
-        _passphrase: Option<&str>,
-    ) -> GpgResult<Self> {
+    pub fn generate(user_id: &str, _passphrase: Option<&str>) -> GpgResult<Self> {
         let (cert, _revocation) = CertBuilder::new()
             .add_userid(user_id)
             .add_signing_subkey()
@@ -102,23 +101,24 @@ impl GpgManager {
     /// Get key creation time
     pub fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
         chrono::DateTime::from_timestamp(
-            self.cert.primary_key().creation_time()
+            self.cert
+                .primary_key()
+                .creation_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64,
             0,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     /// Check if key is valid (not expired, not revoked)
     pub fn is_valid(&self) -> bool {
         self.cert
             .with_policy(POLICY, None)
-            .map(|valid| {
-                match valid.revocation_status() {
-                    sequoia_openpgp::types::RevocationStatus::Revoked(_) => false,
-                    _ => true,
-                }
+            .map(|valid| match valid.revocation_status() {
+                sequoia_openpgp::types::RevocationStatus::Revoked(_) => false,
+                _ => true,
             })
             .unwrap_or(false)
     }
@@ -139,12 +139,9 @@ impl GpgManager {
 
         let message = Message::new(&mut ciphertext);
 
-        let message = Encryptor2::for_recipients(
-            message,
-            vec![Recipient::from(recipient_key)],
-        )
-        .symmetric_algo(SymmetricAlgorithm::AES256)
-        .build()?;
+        let message = Encryptor2::for_recipients(message, vec![Recipient::from(recipient_key)])
+            .symmetric_algo(SymmetricAlgorithm::AES256)
+            .build()?;
 
         let mut literal = LiteralWriter::new(message).build()?;
         literal.write_all(plaintext)?;
@@ -160,8 +157,8 @@ impl GpgManager {
             passphrase: passphrase.map(|s| s.to_string()),
         };
 
-        let mut decryptor = DecryptorBuilder::from_bytes(ciphertext)?
-            .with_policy(POLICY, None, helper)?;
+        let mut decryptor =
+            DecryptorBuilder::from_bytes(ciphertext)?.with_policy(POLICY, None, helper)?;
 
         let mut plaintext = Vec::new();
         std::io::copy(&mut decryptor, &mut plaintext)?;
@@ -236,7 +233,13 @@ impl DecryptionHelper for VaulticDecryptionHelper<'_> {
         D: FnMut(SymmetricAlgorithm, &SessionKey) -> bool,
     {
         // Find our encryption key
-        for key in self.cert.keys().with_policy(POLICY, None).supported().secret() {
+        for key in self
+            .cert
+            .keys()
+            .with_policy(POLICY, None)
+            .supported()
+            .secret()
+        {
             // Try to decrypt each PKESK
             for pkesk in pkesks {
                 // Try to match recipient - if wildcard recipient, try all keys
@@ -283,8 +286,7 @@ impl DecryptionHelper for VaulticDecryptionHelper<'_> {
 pub fn find_gpg_key(key_id: &str) -> GpgResult<GpgManager> {
     // Try ~/.gnupg first
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let gnupg_home = std::env::var("GNUPGHOME")
-        .unwrap_or_else(|_| format!("{}/.gnupg", home));
+    let gnupg_home = std::env::var("GNUPGHOME").unwrap_or_else(|_| format!("{}/.gnupg", home));
 
     let pubring_path = format!("{}/pubring.kbx", gnupg_home);
     let legacy_pubring_path = format!("{}/pubring.gpg", gnupg_home);
@@ -293,7 +295,10 @@ pub fn find_gpg_key(key_id: &str) -> GpgResult<GpgManager> {
     for path in [&pubring_path, &legacy_pubring_path] {
         if let Ok(manager) = GpgManager::from_file(path) {
             if manager.fingerprint().ends_with(key_id)
-                || manager.user_id().map(|u| u.contains(key_id)).unwrap_or(false)
+                || manager
+                    .user_id()
+                    .map(|u| u.contains(key_id))
+                    .unwrap_or(false)
             {
                 return Ok(manager);
             }

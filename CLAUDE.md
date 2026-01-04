@@ -14,21 +14,26 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: ~98% Complete
+## Current Status: ~99% Complete
 
-### Checkpoint: 2025-12-28 (Final)
+### Checkpoint: 2026-01-03
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 42 passing
+**Tests**: 72 passing
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
+**CI/CD**: GitHub Actions configured
 **GitHub**: https://github.com/punitmishra/vaultic
 
 ```bash
 # Verify everything works
 cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (42 pass)
+cargo test                   # Run all tests (72 pass)
 ./target/release/vaultic --help  # Show all commands
+
+# New commands
+./target/release/vaultic health            # Security audit
+./target/release/vaultic health --verbose  # Detailed breakdown
 ```
 
 ---
@@ -114,8 +119,8 @@ vaultic tui
 | `unlock` | ✅ WORKING | Password + session creation |
 | `lock` | ✅ WORKING | Secure session destruction |
 | `status` | ✅ WORKING | Shows vault/session info |
-| `add` | ✅ WORKING | Full entry creation with tags |
-| `list` | ✅ WORKING | Filters by tags, folder |
+| `add` | ✅ WORKING | Full entry creation with tags, favorites, custom fields, notes |
+| `list` | ✅ WORKING | Filters by tags, folder, favorites |
 | `generate` | ✅ WORKING | Password gen with entropy |
 | `get` | ✅ WORKING | Entry retrieval |
 | `edit` | ⚠️ PARTIAL | Basic implementation |
@@ -127,6 +132,10 @@ vaultic tui
 | `completions` | ✅ WORKING | bash, zsh, fish, powershell |
 | `check` | ✅ WORKING | HIBP breach checking |
 | `analyze` | ✅ WORKING | AI password analysis |
+| `health` | ✅ WORKING | Security audit with health score |
+| `history` | ✅ WORKING | Password history tracking and restore |
+| `batch` | ✅ WORKING | Batch operations (tag, delete, move, favorite) |
+| `credential` | ✅ WORKING | Git credential helper integration |
 | `share` | ⚠️ STUB | Identity management needed |
 | `suggest` | ⚠️ STUB | AI suggestions needed |
 
@@ -135,18 +144,22 @@ vaultic tui
 ## Test Results (Latest)
 
 ```
-cargo test: 42 tests passing
+cargo test: 47 tests passing
 cargo build --release: Success
 
 Local workflow test:
-✓ init      - Vault created
-✓ unlock    - Session created (15 min)
-✓ add       - Entries added with tags
-✓ generate  - Strong password with entropy
-✓ list      - Formatted table output
-✓ status    - Shows vault info
-✓ tui       - Full terminal UI working
-✓ lock      - Session destroyed
+✓ init       - Vault created
+✓ unlock     - Session created (15 min)
+✓ add        - Entries added with tags, custom fields, notes
+✓ generate   - Strong password with entropy
+✓ list       - Formatted table output
+✓ status     - Shows vault info
+✓ health     - Security audit report
+✓ history    - Password history and restore
+✓ batch      - Batch operations on entries
+✓ credential - Git credential helper
+✓ tui        - Full terminal UI working
+✓ lock       - Session destroyed
 ✓ completions - bash/zsh/fish working
 ```
 
@@ -214,6 +227,47 @@ Fully implemented with:
 
 ---
 
+## Nix Development Environment
+
+The project includes Nix flake configuration for reproducible builds with all dependencies.
+
+### Quick Start with Nix
+
+```bash
+# Enter development shell (includes all deps for FIDO2 + GPG)
+nix develop
+
+# Or use minimal shell (no FIDO2/GPG deps)
+nix develop .#minimal
+
+# Build with Nix
+nix build              # Full build with all features
+nix build .#minimal    # Minimal build
+
+# With direnv (auto-activates on cd)
+direnv allow
+```
+
+### Without Nix (Manual Dependencies)
+
+For building without optional features, no extra deps needed:
+```bash
+cargo build --release
+```
+
+For optional features:
+- **GPG support**: `apt install nettle-dev libgmp-dev` (or equivalent)
+- **FIDO2 support**: `apt install libudev-dev` (or equivalent)
+
+```bash
+# Build with optional features
+cargo build --release --features gpg
+cargo build --release --features fido2
+cargo build --release --all-features
+```
+
+---
+
 ## Development Commands
 
 ```bash
@@ -265,8 +319,8 @@ rm -rf /tmp/test_vault
 
 ## Notes for Claude
 
-1. **98% complete** - Only polish and optional features remain
-2. **42 tests passing** - Keep them green
+1. **99% complete** - Only polish and optional features remain
+2. **72 tests passing** - Keep them green
 3. **TUI is fully working** - Tested and confirmed working by user
 4. **Session system works** - Don't recreate it
 5. **--password flag exists** - For non-interactive testing
@@ -274,11 +328,14 @@ rm -rf /tmp/test_vault
 7. **Web client exists** - Simple demo in web/index.html
 8. **Shell completions work** - bash, zsh, fish, powershell
 9. **README is comprehensive** - Includes TUI mockup and full keybindings
+10. **Nix environment configured** - Use `nix develop` for full deps
+11. **GitHub Actions configured** - CI/CD in `.github/workflows/`
+12. **Claude Code hooks set up** - Commands in `.claude/commands/`
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)
 - Uses `VaultStorage::unlock(&master_key)` to decrypt entries
-- Clipboard copy uses the `clipboard` crate
+- Clipboard copy uses the `arboard` crate
 - Password visibility toggle in detail view
 - Delete has confirmation popup
 
@@ -287,3 +344,4 @@ rm -rf /tmp/test_vault
 - Storage needs `unlock()` call before reading entries
 - SensitiveString uses `.expose()` to access inner value
 - All entries encrypted with XChaCha20-Poly1305
+- FIDO2 and GPG are optional features (require system deps)

@@ -7,6 +7,9 @@
 //! - Secure sharing with perfect forward secrecy
 //! - Local-first, no cloud dependencies
 
+// Allow unused code during development (many features are stubbed)
+#![allow(dead_code)]
+
 use clap::Parser;
 use std::process::ExitCode;
 
@@ -14,7 +17,9 @@ mod ai;
 mod cli;
 mod crypto;
 mod export;
+#[cfg(feature = "fido2")]
 mod fido2;
+#[cfg(feature = "gpg")]
 mod gpg;
 mod import;
 mod models;
@@ -24,7 +29,7 @@ mod storage;
 mod totp;
 mod tui;
 
-use cli::{Cli, run_command};
+use cli::{run_command, Cli};
 
 fn main() -> ExitCode {
     // Initialize logging

@@ -1,7 +1,6 @@
 # Rust build artifacts
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # IDE
 .idea/
@@ -21,6 +20,8 @@ Thumbs.db
 # Local config
 .env
 .env.local
+.envrc
+.direnv/
 
 # Vault data (never commit real vaults!)
 .vaultic/

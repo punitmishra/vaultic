@@ -6,7 +6,7 @@
 //! - LastPass CSV export
 //! - 1Password CSV export
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
 
 use crate::crypto::{Cipher, CryptoError, MasterKey};
@@ -67,6 +67,7 @@ struct BitwardenItem {
     login: Option<BitwardenLogin>,
     notes: Option<String>,
     #[serde(rename = "folderId")]
+    #[allow(dead_code)]
     folder_id: Option<String>,
 }
 
@@ -88,21 +89,31 @@ pub fn import_bitwarden(json: &str) -> ImportResult<Vec<VaultEntry>> {
     let export: BitwardenExport = serde_json::from_str(json)
         .map_err(|e| ImportError::Parse(format!("Invalid Bitwarden JSON: {}", e)))?;
 
-    let entries = export.items.into_iter()
+    let entries = export
+        .items
+        .into_iter()
         .filter(|item| item.item_type == 1) // Only login items
         .map(|item| {
             let mut entry = VaultEntry::new(&item.name, EntryType::Password);
             if let Some(login) = item.login {
-                if let Some(u) = login.username { entry.username = Some(u); }
-                if let Some(p) = login.password { entry.password = Some(SensitiveString::new(p)); }
+                if let Some(u) = login.username {
+                    entry.username = Some(u);
+                }
+                if let Some(p) = login.password {
+                    entry.password = Some(SensitiveString::new(p));
+                }
                 if let Some(uris) = login.uris {
                     if let Some(uri) = uris.first().and_then(|u| u.uri.clone()) {
                         entry.url = Some(uri);
                     }
                 }
-                if let Some(totp) = login.totp { entry.totp_secret = Some(SensitiveString::new(totp)); }
+                if let Some(totp) = login.totp {
+                    entry.totp_secret = Some(SensitiveString::new(totp));
+                }
             }
-            if let Some(notes) = item.notes { entry.notes = Some(SensitiveString::new(notes)); }
+            if let Some(notes) = item.notes {
+                entry.notes = Some(SensitiveString::new(notes));
+            }
             entry
         })
         .collect();
@@ -119,14 +130,24 @@ pub fn import_lastpass(csv: &str) -> ImportResult<Vec<VaultEntry>> {
     lines.next();
 
     for line in lines {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let fields: Vec<&str> = parse_csv_line(line);
         if fields.len() >= 4 {
             let mut entry = VaultEntry::new(fields[3], EntryType::Password);
-            if !fields[0].is_empty() { entry.url = Some(fields[0].to_string()); }
-            if !fields[1].is_empty() { entry.username = Some(fields[1].to_string()); }
-            if !fields[2].is_empty() { entry.password = Some(SensitiveString::new(fields[2].to_string())); }
-            if fields.len() > 4 && !fields[4].is_empty() { entry.folder = Some(fields[4].to_string()); }
+            if !fields[0].is_empty() {
+                entry.url = Some(fields[0].to_string());
+            }
+            if !fields[1].is_empty() {
+                entry.username = Some(fields[1].to_string());
+            }
+            if !fields[2].is_empty() {
+                entry.password = Some(SensitiveString::new(fields[2].to_string()));
+            }
+            if fields.len() > 4 && !fields[4].is_empty() {
+                entry.folder = Some(fields[4].to_string());
+            }
             entries.push(entry);
         }
     }
@@ -142,14 +163,24 @@ pub fn import_1password(csv: &str) -> ImportResult<Vec<VaultEntry>> {
     lines.next();
 
     for line in lines {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let fields: Vec<&str> = parse_csv_line(line);
         if fields.len() >= 3 {
             let mut entry = VaultEntry::new(fields[0], EntryType::Password);
-            if !fields[1].is_empty() { entry.username = Some(fields[1].to_string()); }
-            if !fields[2].is_empty() { entry.password = Some(SensitiveString::new(fields[2].to_string())); }
-            if fields.len() > 3 && !fields[3].is_empty() { entry.url = Some(fields[3].to_string()); }
-            if fields.len() > 4 && !fields[4].is_empty() { entry.notes = Some(SensitiveString::new(fields[4].to_string())); }
+            if !fields[1].is_empty() {
+                entry.username = Some(fields[1].to_string());
+            }
+            if !fields[2].is_empty() {
+                entry.password = Some(SensitiveString::new(fields[2].to_string()));
+            }
+            if fields.len() > 3 && !fields[3].is_empty() {
+                entry.url = Some(fields[3].to_string());
+            }
+            if fields.len() > 4 && !fields[4].is_empty() {
+                entry.notes = Some(SensitiveString::new(fields[4].to_string()));
+            }
             entries.push(entry);
         }
     }
@@ -181,7 +212,8 @@ mod tests {
 
     #[test]
     fn test_import_bitwarden() {
-        let json = r#"{"items":[{"name":"Test","type":1,"login":{"username":"user","password":"pass"}}]}"#;
+        let json =
+            r#"{"items":[{"name":"Test","type":1,"login":{"username":"user","password":"pass"}}]}"#;
         let entries = import_bitwarden(json).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "Test");

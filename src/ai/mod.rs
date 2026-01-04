@@ -1,22 +1,22 @@
 //! AI-powered password management assistance
-//! 
+//!
 //! Provides intelligent suggestions for:
 //! - Password rotation
 //! - Weak password detection
 //! - Duplicate password detection
 //! - Organization suggestions
 //! - Breach checking
-//! 
+//!
 //! Supports both local (Ollama/llama.cpp) and cloud (encrypted) backends.
 
-use std::collections::HashMap;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::crypto::{Cipher, PasswordAnalyzer};
+use crate::crypto::PasswordAnalyzer;
 use crate::models::{
     AiSuggestion, PasswordStrength, SuggestionPriority, SuggestionType, VaultEntry,
 };
@@ -44,15 +44,9 @@ pub type AiResult<T> = Result<T, AiError>;
 #[serde(tag = "type")]
 pub enum AiBackend {
     /// Local Ollama instance
-    Ollama {
-        url: String,
-        model: String,
-    },
+    Ollama { url: String, model: String },
     /// Local llama.cpp server
-    LlamaCpp {
-        url: String,
-        model_path: String,
-    },
+    LlamaCpp { url: String, model_path: String },
     /// Disabled (only rule-based analysis)
     Disabled,
 }
@@ -200,10 +194,7 @@ impl PasswordAi {
             .iter()
             .filter(|e| e.needs_rotation())
             .map(|entry| {
-                let days_overdue = entry
-                    .days_until_rotation()
-                    .map(|d| -d)
-                    .unwrap_or(0);
+                let days_overdue = entry.days_until_rotation().map(|d| -d).unwrap_or(0);
 
                 AiSuggestion {
                     id: Uuid::new_v4(),
@@ -256,12 +247,8 @@ impl PasswordAi {
     /// Get AI-powered suggestions (privacy-preserving)
     async fn get_ai_suggestions(&self, entries: &[VaultEntry]) -> AiResult<Vec<AiSuggestion>> {
         match &self.config.backend {
-            AiBackend::Ollama { url, model } => {
-                self.query_ollama(url, model, entries).await
-            }
-            AiBackend::LlamaCpp { url, .. } => {
-                self.query_llamacpp(url, entries).await
-            }
+            AiBackend::Ollama { url, model } => self.query_ollama(url, model, entries).await,
+            AiBackend::LlamaCpp { url, .. } => self.query_llamacpp(url, entries).await,
             AiBackend::Disabled => Ok(Vec::new()),
         }
     }
@@ -363,12 +350,10 @@ Respond with JSON array of suggestions.</s>
     /// Prepare a privacy-safe summary (no actual passwords or secrets)
     fn prepare_safe_summary(&self, entries: &[VaultEntry]) -> String {
         let total = entries.len();
-        let by_type: HashMap<String, usize> = entries
-            .iter()
-            .fold(HashMap::new(), |mut acc, e| {
-                *acc.entry(e.entry_type.to_string()).or_insert(0) += 1;
-                acc
-            });
+        let by_type: HashMap<String, usize> = entries.iter().fold(HashMap::new(), |mut acc, e| {
+            *acc.entry(e.entry_type.to_string()).or_insert(0) += 1;
+            acc
+        });
 
         let weak_count = entries
             .iter()
@@ -425,8 +410,8 @@ Common tags: {:?}"#,
         let json_end = response.rfind(']').map(|i| i + 1).unwrap_or(response.len());
         let json_str = &response[json_start..json_end];
 
-        let parsed: Vec<AiSuggestionRaw> = serde_json::from_str(json_str)
-            .map_err(|e| AiError::InvalidResponse(e.to_string()))?;
+        let parsed: Vec<AiSuggestionRaw> =
+            serde_json::from_str(json_str).map_err(|e| AiError::InvalidResponse(e.to_string()))?;
 
         Ok(parsed
             .into_iter()
@@ -461,7 +446,7 @@ Common tags: {:?}"#,
         }
 
         // Use k-anonymity: only send first 5 chars of SHA1 hash
-        use sha1::{Sha1, Digest as Sha1Digest};
+        use sha1::{Digest as Sha1Digest, Sha1};
         let mut hasher = Sha1::new();
         hasher.update(password.as_bytes());
         let hash = hex::encode(hasher.finalize()).to_uppercase();
@@ -496,10 +481,10 @@ Common tags: {:?}"#,
     }
 
     /// Generate a smart password based on site requirements
-    pub async fn generate_smart_password(&self, site_url: Option<&str>) -> String {
+    pub async fn generate_smart_password(&self, _site_url: Option<&str>) -> String {
         // Default strong password
         let generator = crate::crypto::PasswordGenerator::new(20);
-        
+
         // Could query AI for site-specific requirements, but for now just generate
         generator.generate()
     }
@@ -540,13 +525,18 @@ struct AiSuggestionRaw {
     message: String,
     priority: String,
     #[serde(default)]
+    #[allow(dead_code)]
     r#type: String,
 }
 
 // Hex encoding
 mod hex {
     pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes.as_ref().iter().map(|b| format!("{:02x}", b)).collect()
+        bytes
+            .as_ref()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect()
     }
 }
 
@@ -559,8 +549,7 @@ mod tests {
         let ai = PasswordAi::new(AiConfig::default());
 
         let entries = vec![
-            VaultEntry::new("Test1", crate::models::EntryType::Password)
-                .with_password("123456"),
+            VaultEntry::new("Test1", crate::models::EntryType::Password).with_password("123456"),
             VaultEntry::new("Test2", crate::models::EntryType::Password)
                 .with_password("correct-horse-battery-staple"),
         ];

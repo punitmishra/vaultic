@@ -13,7 +13,7 @@ use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
 use crate::crypto::{Cipher, MasterKey};
 
@@ -97,8 +97,8 @@ impl SessionManager {
         };
 
         // Serialize
-        let json = serde_json::to_vec(&session)
-            .map_err(|e| SessionError::Serialization(e.to_string()))?;
+        let json =
+            serde_json::to_vec(&session).map_err(|e| SessionError::Serialization(e.to_string()))?;
 
         // Compress
         let compressed = compress(&json)?;
@@ -120,14 +120,16 @@ impl SessionManager {
 
         // Decrypt
         let cipher = Cipher::new(&self.machine_key);
-        let compressed = cipher.decrypt(&encrypted).map_err(|_| SessionError::Corrupted)?;
+        let compressed = cipher
+            .decrypt(&encrypted)
+            .map_err(|_| SessionError::Corrupted)?;
 
         // Decompress
         let json = decompress(&compressed)?;
 
         // Deserialize
-        let session: SessionData = serde_json::from_slice(&json)
-            .map_err(|_| SessionError::Corrupted)?;
+        let session: SessionData =
+            serde_json::from_slice(&json).map_err(|_| SessionError::Corrupted)?;
 
         // Check expiration
         if Utc::now() > session.expires_at {
