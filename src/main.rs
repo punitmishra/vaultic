@@ -24,6 +24,7 @@ mod gpg;
 mod import;
 mod migration;
 mod models;
+mod recovery;
 mod session;
 mod sharing;
 mod storage;

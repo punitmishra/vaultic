@@ -14,22 +14,23 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: 100% Feature Complete
+## Current Status: v2.0 Multi-Method Unlock In Progress
 
 ### Checkpoint: 2026-01-04
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 120 passing (49 bin + 47 lib + 19 integration + 5 doctests)
+**Tests**: 196 passing (85 bin + 87 lib + 19 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
 **CI/CD**: GitHub Actions configured and passing
 **Documentation**: Comprehensive with demos
 **GitHub**: https://github.com/punitmishra/vaultic
+**v2.0 Progress**: Phase 1 Complete, Phase 2 In Progress
 
 ```bash
 # Verify everything works
 cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (120 pass)
+cargo test                   # Run all tests (196 pass)
 ./target/release/vaultic --help  # Show all commands
 
 # Key commands
@@ -38,6 +39,8 @@ cargo test                   # Run all tests (120 pass)
 ./target/release/vaultic history           # Password history
 ./target/release/vaultic batch             # Batch operations
 ./target/release/vaultic credential        # Git credential helper
+./target/release/vaultic migrate           # Migrate v1 vault to v2
+./target/release/vaultic unlock-method     # Manage unlock methods
 ```
 
 ---
@@ -61,14 +64,28 @@ cargo test                   # Run all tests (120 pass)
 | - | Web Client (terminal-style demo) | ✅ Complete |
 | - | Demo Recordings (asciinema) | ✅ Complete |
 
+### v2.0 Multi-Method Unlock Progress
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 1 | Key Hierarchy (VaultKey, KEK, wrapping) | ✅ Complete |
+| 2 | BIP39 Recovery Keys + QR Display | 🔄 In Progress |
+| 3 | AI Auto-Tagging | ⏳ Pending |
+| 4 | Shell Integration (SSH, Git) | ⏳ Pending |
+
 ### Module Status
 
 | Module | Status | Lines | Description |
 |--------|--------|-------|-------------|
-| `cli` | COMPLETE | ~1500 | All CLI commands + batch/history/credential |
+| `cli` | COMPLETE | ~1800 | All CLI commands + batch/history/credential/migrate |
 | `tui` | COMPLETE | ~650 | Full ratatui TUI with vim keys |
-| `crypto` | COMPLETE | ~600 | XChaCha20-Poly1305, Argon2id, password gen |
-| `storage` | COMPLETE | ~700 | Sled DB, encrypted CRUD, search, history |
+| `crypto` | COMPLETE | ~1200 | XChaCha20-Poly1305, Argon2id, key hierarchy |
+| `crypto/keys` | NEW | ~430 | VaultKey, KEK, UnlockMethod, VaultKeyring |
+| `crypto/kek` | NEW | ~230 | KEK derivation (password, recovery, hardware) |
+| `crypto/wrap` | NEW | ~330 | Key wrapping/unwrapping with XChaCha20-Poly1305 |
+| `storage` | COMPLETE | ~900 | Sled DB, encrypted CRUD, search, history |
+| `storage/keyring` | NEW | ~200 | Keyring persistence and version detection |
+| `migration` | NEW | ~390 | V1 to V2 vault migration with backup/rollback |
 | `session` | COMPLETE | ~250 | Compressed sessions, auto-expiry |
 | `ai` | COMPLETE | ~600 | Ollama integration, HIBP checking |
 | `models` | COMPLETE | ~250 | VaultEntry, SensitiveString, PasswordHistory |
@@ -78,7 +95,7 @@ cargo test                   # Run all tests (120 pass)
 | `fido2` | COMPLETE | ~300 | Structure ready (needs hardware) |
 | `import` | COMPLETE | ~250 | Bitwarden, LastPass, 1Password |
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
-| `tests` | COMPLETE | ~500 | 120 tests (unit, integration, doctests) |
+| `tests` | COMPLETE | ~700 | 196 tests (unit, integration, doctests) |
 
 ---
 
@@ -146,6 +163,8 @@ vaultic tui
 | `history` | ✅ WORKING | Password history tracking and restore |
 | `batch` | ✅ WORKING | Batch operations (tag, delete, move, favorite) |
 | `credential` | ✅ WORKING | Git credential helper integration |
+| `migrate` | ✅ WORKING | Migrate v1 vault to v2 with multi-method unlock |
+| `unlock-method` | ✅ WORKING | List, add, remove unlock methods |
 | `share` | ⚠️ STUB | Identity management needed |
 | `suggest` | ⚠️ STUB | AI suggestions needed |
 
@@ -154,9 +173,9 @@ vaultic tui
 ## Test Results (Latest)
 
 ```
-cargo test: 120 tests passing
-  - 49 bin tests (CLI parsing, commands)
-  - 47 lib tests (crypto, storage, models)
+cargo test: 196 tests passing
+  - 85 bin tests (CLI parsing, commands)
+  - 87 lib tests (crypto, storage, models, migration)
   - 19 integration tests (end-to-end workflows)
   - 5 doctests (code examples in documentation)
 
@@ -192,10 +211,17 @@ Local workflow test:
 src/
 ├── main.rs           # Entry point
 ├── lib.rs            # Module exports
-├── cli/mod.rs        # All CLI commands (~1300 lines)
+├── cli/mod.rs        # All CLI commands (~1800 lines)
 ├── tui/mod.rs        # Full TUI implementation (~650 lines)
-├── crypto/mod.rs     # Encryption, KDF, password gen
-├── storage/mod.rs    # Sled DB operations
+├── crypto/
+│   ├── mod.rs        # Encryption, KDF, password gen
+│   ├── keys.rs       # VaultKey, KEK, UnlockMethod, VaultKeyring
+│   ├── kek.rs        # KEK derivation functions
+│   └── wrap.rs       # Key wrapping/unwrapping
+├── storage/
+│   ├── mod.rs        # Sled DB operations
+│   └── keyring.rs    # Keyring persistence
+├── migration/mod.rs  # V1 to V2 migration
 ├── session/mod.rs    # Session management
 ├── models/mod.rs     # Data structures
 ├── ai/mod.rs         # Ollama + HIBP integration

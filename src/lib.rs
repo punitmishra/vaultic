@@ -55,6 +55,7 @@ pub mod gpg;
 pub mod import;
 pub mod migration;
 pub mod models;
+pub mod recovery;
 pub mod session;
 pub mod sharing;
 pub mod storage;

@@ -375,6 +375,12 @@ pub enum Commands {
         #[command(subcommand)]
         command: UnlockMethodCommands,
     },
+
+    /// Manage BIP39 recovery keys
+    Recovery {
+        #[command(subcommand)]
+        command: RecoveryCommands,
+    },
 }
 
 /// Batch operation subcommands
@@ -546,6 +552,44 @@ impl std::fmt::Display for UnlockMethodType {
             UnlockMethodType::Gpg => write!(f, "gpg"),
         }
     }
+}
+
+/// Recovery key management subcommands
+#[derive(Subcommand)]
+pub enum RecoveryCommands {
+    /// Generate a new BIP39 recovery key
+    Generate {
+        /// Show QR code for backup
+        #[arg(long)]
+        qr: bool,
+
+        /// Label for this recovery key
+        #[arg(short, long)]
+        label: Option<String>,
+
+        /// Master password (for non-interactive use)
+        #[arg(long, env = "VAULTIC_PASSWORD", hide = true)]
+        password: Option<String>,
+    },
+
+    /// Verify a recovery phrase
+    Verify {
+        /// The recovery phrase to verify (or will prompt)
+        phrase: Option<String>,
+    },
+
+    /// Show recovery key info (if configured)
+    Show,
+
+    /// Unlock vault using recovery key
+    Unlock {
+        /// The recovery phrase (or will prompt)
+        phrase: Option<String>,
+
+        /// Session timeout in minutes
+        #[arg(short, long, default_value = "15")]
+        timeout: u32,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -2490,6 +2534,269 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             Ok(())
+        }
+
+        Commands::Recovery { command } => {
+            let vault_path = default_vault_path(&cli.vault);
+
+            use crate::recovery::RecoveryKey;
+            use crate::storage::keyring::{KeyringStorage, VaultVersion, detect_vault_version};
+            use crate::storage::KdfParamsStorage;
+            use crate::crypto::wrap::unwrap_vault_key;
+            use crate::crypto::keys::UnlockMethod;
+            use crate::crypto::MasterKey;
+
+            match command {
+                RecoveryCommands::Generate { qr, label, password } => {
+                    // Check vault version
+                    let version = detect_vault_version(&vault_path);
+                    if version == VaultVersion::V1 {
+                        Output::error("This vault uses the v1 format. Run 'vaultic migrate' first.");
+                        return Ok(());
+                    }
+                    if version == VaultVersion::Unknown {
+                        Output::error("Not a valid vault directory. Run 'vaultic init' first.");
+                        return Ok(());
+                    }
+
+                    // Check if recovery key already exists
+                    let keyring_storage = KeyringStorage::new(&vault_path);
+                    let mut keyring = keyring_storage.load()?;
+
+                    if keyring.has_recovery() {
+                        Output::warning("A recovery key is already configured for this vault.");
+                        if !Prompts::confirm("Do you want to replace it with a new recovery key?", false)? {
+                            return Ok(());
+                        }
+                        // Remove old recovery key
+                        if let Some(old_key) = keyring.find_by_method(&UnlockMethod::RecoveryKey) {
+                            let old_id = old_key.id;
+                            keyring.remove_key(&old_id)?;
+                        }
+                    }
+
+                    // Get master password to unlock vault and get vault key
+                    let master_password = if let Some(p) = password {
+                        p
+                    } else {
+                        Prompts::master_password(false)?
+                    };
+
+                    // Derive KEK from password
+                    let kdf_params = KdfParamsStorage::load(&vault_path)?;
+                    let password_kek = crate::crypto::kek::derive_from_password(
+                        master_password.as_bytes(),
+                        &kdf_params,
+                    )?;
+
+                    // Get the password encrypted vault key and unwrap it
+                    let password_encrypted = match keyring.find_by_method(&UnlockMethod::Password) {
+                        Some(key) => key,
+                        None => {
+                            Output::error("Password unlock method not found in keyring.");
+                            return Ok(());
+                        }
+                    };
+
+                    let vault_key = unwrap_vault_key(password_encrypted, &password_kek)?;
+
+                    // Generate new recovery key
+                    let recovery_key = RecoveryKey::generate()?;
+
+                    Output::header("Recovery Key Generated");
+                    println!();
+                    Output::warning("⚠️  IMPORTANT: Write down these 24 words and store them safely!");
+                    Output::warning("⚠️  This is the ONLY way to recover your vault if you forget your password.");
+                    Output::warning("⚠️  Anyone with these words can access your vault!");
+                    println!();
+
+                    // Display formatted recovery key
+                    println!("{}", recovery_key.display_formatted());
+
+                    // Show QR code if requested
+                    if qr {
+                        println!();
+                        Output::info("QR Code (for backup scanning):");
+                        println!();
+                        println!("{}", recovery_key.generate_qr()?);
+                    }
+
+                    // Wrap vault key with recovery key
+                    let recovery_label = label.unwrap_or_else(|| "Recovery Key".to_string());
+                    let (encrypted_key, _salt) = recovery_key.wrap_vault_key(&vault_key, Some(recovery_label))?;
+
+                    // Add to keyring and save
+                    keyring.add_key(encrypted_key);
+                    keyring_storage.save(&keyring)?;
+
+                    println!();
+                    Output::success("Recovery key has been added to your vault.");
+                    Output::info(&format!("Fingerprint: {}", recovery_key.fingerprint()));
+                    Output::info(&format!("Checksum: {}", recovery_key.checksum()));
+
+                    Ok(())
+                }
+
+                RecoveryCommands::Verify { phrase } => {
+                    // Get phrase from argument or prompt
+                    let recovery_phrase = if let Some(p) = phrase {
+                        p
+                    } else {
+                        Output::info("Enter your 24-word recovery phrase:");
+                        dialoguer::Input::<String>::new()
+                            .with_prompt("Recovery phrase")
+                            .interact()?
+                    };
+
+                    // Validate the phrase
+                    match RecoveryKey::from_phrase(&recovery_phrase) {
+                        Ok(recovery_key) => {
+                            Output::success("✓ Valid BIP39 recovery phrase!");
+                            println!();
+                            Output::info(&format!("Fingerprint: {}", recovery_key.fingerprint()));
+                            Output::info(&format!("Checksum: {}", recovery_key.checksum()));
+
+                            // Check if it matches the configured recovery key
+                            let version = detect_vault_version(&vault_path);
+                            if version == VaultVersion::V2 {
+                                let keyring_storage = KeyringStorage::new(&vault_path);
+                                if let Ok(keyring) = keyring_storage.load() {
+                                    if let Some(configured) = keyring.find_by_method(&UnlockMethod::RecoveryKey) {
+                                        if let crate::crypto::keys::MethodData::Recovery { fingerprint, .. } = &configured.method_data {
+                                            if *fingerprint == recovery_key.fingerprint() {
+                                                println!();
+                                                Output::success("✓ This recovery key matches the configured vault recovery key!");
+                                            } else {
+                                                println!();
+                                                Output::warning("⚠ This recovery key does NOT match the configured vault recovery key.");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            Output::error(&format!("✗ Invalid recovery phrase: {}", e));
+                            Output::info("Make sure you entered all 24 words correctly.");
+                        }
+                    }
+
+                    Ok(())
+                }
+
+                RecoveryCommands::Show => {
+                    let version = detect_vault_version(&vault_path);
+                    if version != VaultVersion::V2 {
+                        Output::error("This vault doesn't support recovery keys. Run 'vaultic migrate' first.");
+                        return Ok(());
+                    }
+
+                    let keyring_storage = KeyringStorage::new(&vault_path);
+                    let keyring = keyring_storage.load()?;
+
+                    if let Some(recovery) = keyring.find_by_method(&UnlockMethod::RecoveryKey) {
+                        Output::header("Recovery Key Information");
+                        println!();
+
+                        if let Some(label) = &recovery.label {
+                            println!("  Label:       {}", label);
+                        }
+                        if let crate::crypto::keys::MethodData::Recovery { fingerprint, .. } = &recovery.method_data {
+                            println!("  Fingerprint: {} ...", fingerprint);
+                        }
+                        println!("  Created:     {}", recovery.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
+                        if let Some(last_used) = recovery.last_used {
+                            println!("  Last used:   {}", last_used.format("%Y-%m-%d %H:%M:%S UTC"));
+                        } else {
+                            println!("  Last used:   Never");
+                        }
+                        println!("  ID:          {}", recovery.id);
+                    } else {
+                        Output::warning("No recovery key configured for this vault.");
+                        Output::info("Run 'vaultic recovery generate' to create one.");
+                    }
+
+                    Ok(())
+                }
+
+                RecoveryCommands::Unlock { phrase, timeout } => {
+                    let version = detect_vault_version(&vault_path);
+                    if version != VaultVersion::V2 {
+                        Output::error("This vault doesn't support recovery key unlock. Run 'vaultic migrate' first.");
+                        return Ok(());
+                    }
+
+                    let keyring_storage = KeyringStorage::new(&vault_path);
+                    let mut keyring = keyring_storage.load()?;
+
+                    // Check if recovery key is configured
+                    let recovery_encrypted = match keyring.find_by_method(&UnlockMethod::RecoveryKey) {
+                        Some(key) => key,
+                        None => {
+                            Output::error("No recovery key configured for this vault.");
+                            Output::info("Run 'vaultic recovery generate' to create one.");
+                            return Ok(());
+                        }
+                    };
+
+                    // Get recovery phrase
+                    let recovery_phrase = if let Some(p) = phrase {
+                        p
+                    } else {
+                        Output::info("Enter your 24-word recovery phrase:");
+                        dialoguer::Input::<String>::new()
+                            .with_prompt("Recovery phrase")
+                            .interact()?
+                    };
+
+                    // Parse and derive KEK from recovery phrase
+                    let recovery_key = RecoveryKey::from_phrase(&recovery_phrase)?;
+
+                    // Get salt from method data
+                    let salt = if let crate::crypto::keys::MethodData::Recovery { salt, fingerprint } = &recovery_encrypted.method_data {
+                        // Verify fingerprint matches
+                        if *fingerprint != recovery_key.fingerprint() {
+                            Output::error("Recovery phrase does not match the configured recovery key.");
+                            return Ok(());
+                        }
+                        salt.clone()
+                    } else {
+                        Output::error("Invalid recovery key data format");
+                        return Ok(());
+                    };
+
+                    let kek = recovery_key.derive_kek(&salt)?;
+
+                    // Unwrap vault key
+                    let vault_key = match unwrap_vault_key(recovery_encrypted, &kek) {
+                        Ok(key) => key,
+                        Err(_) => {
+                            Output::error("Failed to unlock vault. Invalid recovery phrase.");
+                            return Ok(());
+                        }
+                    };
+
+                    // Convert VaultKey to MasterKey for session
+                    let master_key = MasterKey::from_bytes(*vault_key.expose());
+
+                    // Create session
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    session_mgr.create(&vault_path, &master_key, timeout)?;
+
+                    // Update last_used timestamp
+                    if let Some(recovery_mut) = keyring.find_by_method_mut(&UnlockMethod::RecoveryKey) {
+                        recovery_mut.mark_used();
+                        keyring_storage.save(&keyring)?;
+                    }
+
+                    Output::success(&format!(
+                        "Vault unlocked with recovery key (expires in {} minutes)",
+                        timeout
+                    ));
+
+                    Ok(())
+                }
+            }
         }
     }
 }
