@@ -1,11 +1,39 @@
 //! Cryptographic primitives for Vaultic
 //!
-//! Security design:
-//! - XChaCha20-Poly1305 for symmetric encryption (256-bit, AEAD)
-//! - Argon2id for key derivation (memory-hard, side-channel resistant)
-//! - X25519 for key exchange (sharing)
-//! - Ed25519 for signatures
-//! - HKDF-SHA256 for key expansion
+//! This module provides all cryptographic operations used by Vaultic,
+//! implementing industry-standard algorithms with secure defaults.
+//!
+//! # Security Design
+//!
+//! | Purpose | Algorithm | Key Size |
+//! |---------|-----------|----------|
+//! | Symmetric encryption | XChaCha20-Poly1305 | 256-bit |
+//! | Key derivation | Argon2id | 256-bit output |
+//! | Key exchange | X25519 | 256-bit |
+//! | Signatures | Ed25519 | 256-bit |
+//! | Key expansion | HKDF-SHA256 | Variable |
+//!
+//! # Key Derivation
+//!
+//! Passwords are processed through Argon2id with configurable parameters:
+//! - Memory: 64 MiB (default) to 256 MiB (high security)
+//! - Iterations: 3 (default) to 8 (high security)
+//! - Parallelism: 4 threads
+//!
+//! # Example
+//!
+//! ```
+//! use vaultic::crypto::{Cipher, MasterKey, PasswordGenerator};
+//!
+//! // Generate a strong password
+//! let password = PasswordGenerator::new(20).generate();
+//!
+//! // Encrypt data
+//! let key = MasterKey::from_bytes([0u8; 32]);
+//! let cipher = Cipher::new(key.as_bytes());
+//! let encrypted = cipher.encrypt(b"secret data").unwrap();
+//! let decrypted = cipher.decrypt(&encrypted).unwrap();
+//! ```
 
 use argon2::{password_hash::SaltString, Argon2, Params, Version};
 use chacha20poly1305::{

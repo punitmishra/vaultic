@@ -1,5 +1,25 @@
 //! Core data models for Vaultic
-//! All sensitive data implements Zeroize for secure memory cleanup
+//!
+//! This module contains all the core data structures used throughout Vaultic:
+//!
+//! - [`VaultEntry`] - The main entry type for storing passwords, notes, etc.
+//! - [`SensitiveString`] - A string wrapper that zeroes memory on drop
+//! - [`EntryType`] - Enum of supported entry types
+//! - [`PasswordStrength`] - Password strength classification
+//!
+//! # Security
+//!
+//! All sensitive data types implement [`Zeroize`] for secure memory cleanup.
+//!
+//! # Example
+//!
+//! ```
+//! use vaultic::models::{VaultEntry, EntryType, SensitiveString};
+//!
+//! let entry = VaultEntry::new("GitHub", EntryType::Password)
+//!     .with_username("user@example.com")
+//!     .with_password("super_secret_password");
+//! ```
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -7,16 +27,26 @@ use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Entry types supported by Vaultic
+///
+/// Each entry type has specific fields and behaviors optimized for that use case.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryType {
+    /// Standard password entry with username/password
     Password,
+    /// Encrypted text note
     SecureNote,
+    /// Credit/debit card information
     CreditCard,
+    /// Personal identity information
     Identity,
+    /// SSH private key
     SshKey,
+    /// API key or token
     ApiKey,
+    /// Time-based one-time password
     Totp,
+    /// Custom entry type with user-defined name
     Custom(String),
 }
 
@@ -35,23 +65,53 @@ impl std::fmt::Display for EntryType {
     }
 }
 
-/// A sensitive string that zeroes memory on drop
+/// A sensitive string that zeroes memory on drop.
+///
+/// This wrapper ensures that sensitive data like passwords is securely
+/// erased from memory when no longer needed, preventing memory disclosure attacks.
+///
+/// # Security
+///
+/// - Implements [`Zeroize`] to overwrite memory with zeros on drop
+/// - Debug output is redacted to prevent accidental logging
+/// - Clone is supported but creates a new copy of the sensitive data
+///
+/// # Example
+///
+/// ```
+/// use vaultic::SensitiveString;
+///
+/// let password = SensitiveString::new("my_secret_password");
+/// assert_eq!(password.expose(), "my_secret_password");
+/// assert_eq!(password.len(), 18);
+///
+/// // Debug output is redacted
+/// assert!(format!("{:?}", password).contains("REDACTED"));
+/// ```
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SensitiveString(String);
 
 impl SensitiveString {
+    /// Create a new sensitive string from any string-like type.
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
 
+    /// Expose the inner string value.
+    ///
+    /// # Warning
+    ///
+    /// Be careful not to log or display this value unintentionally.
     pub fn expose(&self) -> &str {
         &self.0
     }
 
+    /// Returns the length of the sensitive string in bytes.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns true if the sensitive string is empty.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -75,18 +135,39 @@ impl From<&str> for SensitiveString {
     }
 }
 
-/// Password strength assessment
+/// Password strength assessment levels.
+///
+/// Strength is determined by analyzing:
+/// - Length (minimum 12 characters recommended)
+/// - Character variety (uppercase, lowercase, digits, symbols)
+/// - Entropy (randomness)
+/// - Common patterns and dictionary words
+///
+/// # Example
+///
+/// ```
+/// use vaultic::{PasswordStrength, PasswordAnalyzer};
+///
+/// let strength = PasswordAnalyzer::strength("MyP@ssw0rd123!");
+/// assert!(strength >= PasswordStrength::Fair);
+/// ```
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum PasswordStrength {
+    /// Score 0-20: Easily cracked, avoid using
     VeryWeak,
+    /// Score 20-40: Vulnerable to attacks
     Weak,
+    /// Score 40-60: Acceptable for low-security uses
     Fair,
+    /// Score 60-80: Good for most purposes
     Strong,
+    /// Score 80-100: Excellent security
     VeryStrong,
 }
 
 impl PasswordStrength {
+    /// Returns the terminal color name for this strength level.
     pub fn color(&self) -> &'static str {
         match self {
             Self::VeryWeak => "red",
@@ -97,6 +178,7 @@ impl PasswordStrength {
         }
     }
 
+    /// Returns an emoji indicator for this strength level.
     pub fn emoji(&self) -> &'static str {
         match self {
             Self::VeryWeak => "🔴",
@@ -108,9 +190,12 @@ impl PasswordStrength {
     }
 }
 
-/// Custom field for flexible data storage
+/// Custom field for flexible data storage.
+///
+/// Allows storing arbitrary key-value pairs with optional visibility control.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomField {
+    /// Field name/label
     pub name: String,
     pub value: SensitiveString,
     pub is_hidden: bool,

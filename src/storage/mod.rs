@@ -1,7 +1,42 @@
 //! Encrypted storage layer for Vaultic
 //!
-//! Uses sled as the underlying database with all data encrypted at rest.
-//! Supports multiple vaults and secure key storage.
+//! This module provides persistent, encrypted storage for vault entries using
+//! the sled embedded database. All data is encrypted at rest using the master key.
+//!
+//! # Features
+//!
+//! - **Encryption at rest**: All entries encrypted with XChaCha20-Poly1305
+//! - **CRUD operations**: Create, read, update, delete entries
+//! - **Search**: Filter by name, tags, folder, type, and more
+//! - **Atomic operations**: Transactional updates via sled
+//!
+//! # Storage Layout
+//!
+//! ```text
+//! vault_path/
+//! ├── db/              # Sled database files
+//! ├── kdf_params.json  # Key derivation parameters (unencrypted)
+//! └── session/         # Session files (encrypted)
+//! ```
+//!
+//! # Example
+//!
+//! ```no_run
+//! use vaultic::storage::VaultStorage;
+//! use vaultic::models::{VaultEntry, EntryType};
+//! use vaultic::crypto::MasterKey;
+//!
+//! // Open vault
+//! let mut storage = VaultStorage::open("/path/to/vault").unwrap();
+//!
+//! // Unlock with master key
+//! let key = MasterKey::from_bytes([0u8; 32]);
+//! storage.unlock(&key).unwrap();
+//!
+//! // Add entry
+//! let entry = VaultEntry::new("GitHub", EntryType::Password);
+//! storage.add_entry(&entry).unwrap();
+//! ```
 
 use std::path::{Path, PathBuf};
 
