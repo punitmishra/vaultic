@@ -2505,15 +2505,111 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                 UnlockMethodCommands::Add {
                     method,
-                    label: _,
-                    password: _,
+                    label,
+                    password,
                 } => match method {
                     UnlockMethodType::Password => {
                         Output::info("Password method is configured during 'vaultic init' or 'vaultic migrate'");
                     }
                     UnlockMethodType::Recovery => {
-                        Output::warning("Recovery key generation will be implemented in Phase 2");
-                        Output::info("Coming soon: vaultic recovery generate");
+                        use crate::crypto::keys::UnlockMethod;
+                        use crate::crypto::wrap::unwrap_vault_key;
+                        use crate::recovery::RecoveryKey;
+                        use crate::storage::keyring::{
+                            detect_vault_version, KeyringStorage, VaultVersion,
+                        };
+                        use crate::storage::KdfParamsStorage;
+
+                        // Check vault version
+                        let version = detect_vault_version(&vault_path);
+                        if version == VaultVersion::V1 {
+                            Output::error(
+                                "This vault uses the v1 format. Run 'vaultic migrate' first.",
+                            );
+                            return Ok(());
+                        }
+                        if version == VaultVersion::Unknown {
+                            Output::error("Not a valid vault directory. Run 'vaultic init' first.");
+                            return Ok(());
+                        }
+
+                        // Check if recovery key already exists
+                        let keyring_storage = KeyringStorage::new(&vault_path);
+                        let mut keyring = keyring_storage.load()?;
+
+                        if keyring.has_recovery() {
+                            Output::warning("A recovery key is already configured for this vault.");
+                            if !Prompts::confirm(
+                                "Do you want to replace it with a new recovery key?",
+                                false,
+                            )? {
+                                return Ok(());
+                            }
+                            // Remove old recovery key
+                            if let Some(old_key) = keyring.find_by_method(&UnlockMethod::RecoveryKey)
+                            {
+                                let old_id = old_key.id;
+                                keyring.remove_key(&old_id)?;
+                            }
+                        }
+
+                        // Get master password to unlock vault and get vault key
+                        let master_password = if let Some(p) = password {
+                            p
+                        } else {
+                            Prompts::master_password(false)?
+                        };
+
+                        // Derive KEK from password
+                        let kdf_params = KdfParamsStorage::load(&vault_path)?;
+                        let password_kek = crate::crypto::kek::derive_from_password(
+                            master_password.as_bytes(),
+                            &kdf_params,
+                        )?;
+
+                        // Get the password encrypted vault key and unwrap it
+                        let password_encrypted =
+                            match keyring.find_by_method(&UnlockMethod::Password) {
+                                Some(key) => key,
+                                None => {
+                                    Output::error("Password unlock method not found in keyring.");
+                                    return Ok(());
+                                }
+                            };
+
+                        let vault_key = unwrap_vault_key(password_encrypted, &password_kek)?;
+
+                        // Generate new recovery key
+                        let recovery_key = RecoveryKey::generate()?;
+
+                        Output::header("Recovery Key Generated");
+                        println!();
+                        Output::warning(
+                            "IMPORTANT: Write down these 24 words and store them safely!",
+                        );
+                        Output::warning(
+                            "This is the ONLY way to recover your vault if you forget your password.",
+                        );
+                        Output::warning("Anyone with these words can access your vault!");
+                        println!();
+
+                        // Display formatted recovery key
+                        println!("{}", recovery_key.display_formatted());
+
+                        // Wrap vault key with recovery key
+                        let recovery_label = label.unwrap_or_else(|| "Recovery Key".to_string());
+                        let (encrypted_key, _salt) =
+                            recovery_key.wrap_vault_key(&vault_key, Some(recovery_label))?;
+
+                        // Add to keyring and save
+                        keyring.add_key(encrypted_key);
+                        keyring_storage.save(&keyring)?;
+
+                        println!();
+                        Output::success("Recovery key has been added to your vault.");
+                        Output::info(&format!("Fingerprint: {}", recovery_key.fingerprint()));
+                        Output::info(&format!("Checksum: {}", recovery_key.checksum()));
+                        Output::info("Tip: Use 'vaultic recovery generate --qr' to display a QR code.");
                     }
                     UnlockMethodType::Yubikey => {
                         Output::warning("YubiKey setup will be implemented in Phase 3");

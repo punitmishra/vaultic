@@ -16,21 +16,21 @@ This document provides context for Claude to continue developing Vaultic.
 
 ## Current Status: v2.0 Multi-Method Unlock In Progress
 
-### Checkpoint: 2026-01-04
+### Checkpoint: 2026-02-01
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 196 passing (85 bin + 87 lib + 19 integration + 5 doctests)
+**Tests**: 229 passing (100 bin + 98 lib + 26 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
 **CI/CD**: GitHub Actions configured and passing
 **Documentation**: Comprehensive with demos
 **GitHub**: https://github.com/punitmishra/vaultic
-**v2.0 Progress**: Phase 1 Complete, Phase 2 In Progress
+**v2.0 Progress**: Phase 1 Complete, Phase 2 Complete
 
 ```bash
 # Verify everything works
 cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (196 pass)
+cargo test                   # Run all tests (229 pass)
 ./target/release/vaultic --help  # Show all commands
 
 # Key commands
@@ -60,7 +60,7 @@ cargo test                   # Run all tests (196 pass)
 | 7 | Password History (tracking, listing, restore) | ✅ Complete |
 | 8 | Batch Operations (tag, delete, move, favorite) | ✅ Complete |
 | 9 | Git Credential Helper (get, store, erase) | ✅ Complete |
-| 10 | Integration Tests (19 comprehensive tests) | ✅ Complete |
+| 10 | Integration Tests (26 comprehensive tests) | ✅ Complete |
 | - | Web Client (terminal-style demo) | ✅ Complete |
 | - | Demo Recordings (asciinema) | ✅ Complete |
 
@@ -69,7 +69,7 @@ cargo test                   # Run all tests (196 pass)
 | Phase | Feature | Status |
 |-------|---------|--------|
 | 1 | Key Hierarchy (VaultKey, KEK, wrapping) | ✅ Complete |
-| 2 | BIP39 Recovery Keys + QR Display | 🔄 In Progress |
+| 2 | BIP39 Recovery Keys + QR Display | ✅ Complete |
 | 3 | AI Auto-Tagging | ⏳ Pending |
 | 4 | Shell Integration (SSH, Git) | ⏳ Pending |
 
@@ -95,7 +95,8 @@ cargo test                   # Run all tests (196 pass)
 | `fido2` | COMPLETE | ~300 | Structure ready (needs hardware) |
 | `import` | COMPLETE | ~250 | Bitwarden, LastPass, 1Password |
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
-| `tests` | COMPLETE | ~700 | 196 tests (unit, integration, doctests) |
+| `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
+| `tests` | COMPLETE | ~800 | 229 tests (unit, integration, doctests) |
 
 ---
 
@@ -165,6 +166,7 @@ vaultic tui
 | `credential` | ✅ WORKING | Git credential helper integration |
 | `migrate` | ✅ WORKING | Migrate v1 vault to v2 with multi-method unlock |
 | `unlock-method` | ✅ WORKING | List, add, remove unlock methods |
+| `recovery` | ✅ WORKING | BIP39 recovery key (generate, verify, show, unlock) |
 | `share` | ⚠️ STUB | Identity management needed |
 | `suggest` | ⚠️ STUB | AI suggestions needed |
 
@@ -173,10 +175,10 @@ vaultic tui
 ## Test Results (Latest)
 
 ```
-cargo test: 196 tests passing
-  - 85 bin tests (CLI parsing, commands)
-  - 87 lib tests (crypto, storage, models, migration)
-  - 19 integration tests (end-to-end workflows)
+cargo test: 229 tests passing
+  - 100 bin tests (CLI parsing, commands)
+  - 98 lib tests (crypto, storage, models, migration, recovery)
+  - 26 integration tests (end-to-end workflows)
   - 5 doctests (code examples in documentation)
 
 cargo build --release: Success
@@ -195,6 +197,7 @@ Local workflow test:
 ✓ history    - Password history tracking and restore
 ✓ batch      - Batch operations (tag, delete, move)
 ✓ credential - Git credential helper (get/store/erase)
+✓ recovery   - BIP39 key generation, QR display, unlock
 ✓ tui        - Full terminal UI with vim keys
 ✓ import     - Bitwarden, LastPass, 1Password
 ✓ export     - JSON, CSV, encrypted backup
@@ -366,7 +369,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **120 tests passing** - Keep them green (49 bin + 47 lib + 19 integration + 5 doc)
+2. **229 tests passing** - Keep them green (100 bin + 98 lib + 26 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
@@ -381,6 +384,7 @@ rm -rf /tmp/test_vault
 14. **Git credential helper** - Works with `git config credential.helper vaultic`
 15. **Password history** - Automatic tracking with restore capability
 16. **Batch operations** - Tag, delete, move, favorite multiple entries
+17. **BIP39 Recovery Keys** - Full implementation with QR display and unlock
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)

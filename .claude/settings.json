@@ -15,12 +15,17 @@
   "hooks": {
     "SessionStart": [
       {
-        "command": "cargo build --release 2>&1 | tail -5",
-        "description": "Build vaultic on session start"
-      },
-      {
-        "command": "cargo test 2>&1 | tail -10",
-        "description": "Run tests on session start"
+        "matcher": {},
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo build --release 2>&1 | tail -5"
+          },
+          {
+            "type": "command",
+            "command": "cargo test 2>&1 | tail -10"
+          }
+        ]
       }
     ]
   }

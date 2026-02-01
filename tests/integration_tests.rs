@@ -330,3 +330,125 @@ fn test_password_strength_ordering() {
     assert!(PasswordStrength::Fair < PasswordStrength::Strong);
     assert!(PasswordStrength::Strong < PasswordStrength::VeryStrong);
 }
+
+// ============================================================================
+// BIP39 Recovery Key Tests
+// ============================================================================
+
+#[test]
+fn test_recovery_key_generation() {
+    use vaultic::recovery::RecoveryKey;
+
+    let key = RecoveryKey::generate().expect("Failed to generate recovery key");
+
+    // Should have 24 words
+    assert_eq!(key.words().len(), 24);
+
+    // Phrase should be valid
+    let phrase = key.phrase();
+    assert!(!phrase.is_empty());
+
+    // Fingerprint should be first 4 words
+    let fingerprint = key.fingerprint();
+    let first_four: Vec<&str> = key.words().iter().take(4).copied().collect();
+    assert_eq!(fingerprint, first_four.join(" "));
+}
+
+#[test]
+fn test_recovery_key_from_phrase() {
+    use vaultic::recovery::RecoveryKey;
+
+    // Generate a key and get its phrase
+    let original = RecoveryKey::generate().expect("Failed to generate");
+    let phrase = original.phrase();
+
+    // Parse the phrase back
+    let parsed = RecoveryKey::from_phrase(&phrase).expect("Failed to parse phrase");
+
+    // Should produce the same fingerprint
+    assert_eq!(original.fingerprint(), parsed.fingerprint());
+    assert_eq!(original.checksum(), parsed.checksum());
+}
+
+#[test]
+fn test_recovery_key_invalid_phrase() {
+    use vaultic::recovery::RecoveryKey;
+
+    // Invalid phrases should fail
+    assert!(RecoveryKey::from_phrase("not a valid phrase").is_err());
+    assert!(RecoveryKey::from_phrase("abandon abandon abandon").is_err());
+    assert!(RecoveryKey::from_phrase("").is_err());
+}
+
+#[test]
+fn test_recovery_key_wrap_unwrap() {
+    use vaultic::crypto::keys::VaultKey;
+    use vaultic::crypto::wrap::unwrap_vault_key;
+    use vaultic::recovery::RecoveryKey;
+
+    // Generate a vault key
+    let vault_key = VaultKey::generate();
+
+    // Generate a recovery key
+    let recovery_key = RecoveryKey::generate().expect("Failed to generate recovery key");
+
+    // Wrap the vault key
+    let (encrypted_key, salt) = recovery_key
+        .wrap_vault_key(&vault_key, Some("Test Recovery".to_string()))
+        .expect("Failed to wrap vault key");
+
+    // Derive the same KEK and unwrap
+    let recovery_kek = recovery_key
+        .derive_kek(&salt)
+        .expect("Failed to derive KEK");
+
+    let unwrapped = unwrap_vault_key(&encrypted_key, &recovery_kek).expect("Failed to unwrap");
+
+    // Should match original
+    assert_eq!(vault_key.as_bytes(), unwrapped.as_bytes());
+}
+
+#[test]
+fn test_recovery_key_different_salts() {
+    use vaultic::recovery::RecoveryKey;
+
+    let key = RecoveryKey::generate().expect("Failed to generate");
+
+    let salt1 = [1u8; 32];
+    let salt2 = [2u8; 32];
+
+    let kek1 = key.derive_kek(&salt1).expect("Failed to derive KEK 1");
+    let kek2 = key.derive_kek(&salt2).expect("Failed to derive KEK 2");
+
+    // Different salts should produce different KEKs
+    assert_ne!(kek1.as_bytes(), kek2.as_bytes());
+}
+
+#[test]
+fn test_recovery_key_qr_generation() {
+    use vaultic::recovery::RecoveryKey;
+
+    let key = RecoveryKey::generate().expect("Failed to generate");
+
+    let qr = key.generate_qr().expect("Failed to generate QR");
+
+    // QR should contain unicode block characters
+    assert!(qr.contains('█') || qr.contains('▀') || qr.contains('▄'));
+    // Should be non-empty
+    assert!(!qr.is_empty());
+}
+
+#[test]
+fn test_recovery_key_display_formatted() {
+    use vaultic::recovery::RecoveryKey;
+
+    let key = RecoveryKey::generate().expect("Failed to generate");
+
+    let display = key.display_formatted();
+
+    // Should contain numbered words
+    assert!(display.contains("1."));
+    assert!(display.contains("24."));
+    // Should be multi-line
+    assert!(display.lines().count() > 1);
+}
