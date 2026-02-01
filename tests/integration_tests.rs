@@ -584,3 +584,101 @@ fn test_auto_tag_streaming() {
     assert!(netflix_tags.contains(&"streaming".to_string()));
     assert!(spotify_tags.contains(&"entertainment".to_string()));
 }
+
+// ============================================================================
+// Shell Integration Tests (Phase 4)
+// ============================================================================
+
+#[test]
+fn test_vault_entry_new_fields() {
+    // Test that new VaultEntry fields are initialized correctly
+    let entry = VaultEntry::new("Test SSH Key", EntryType::SshKey);
+
+    assert!(entry.ssh_key_data.is_none());
+    assert!(entry.env_mappings.is_empty());
+}
+
+#[test]
+fn test_ssh_key_data_struct() {
+    use vaultic::models::{SshKeyData, SshKeyType};
+
+    let ssh_data = SshKeyData {
+        key_type: SshKeyType::Ed25519,
+        fingerprint: "SHA256:abc123".to_string(),
+        public_key: Some("ssh-ed25519 AAAA...".to_string()),
+        comment: Some("user@host".to_string()),
+        bits: None,
+    };
+
+    assert_eq!(ssh_data.key_type, SshKeyType::Ed25519);
+    assert_eq!(ssh_data.fingerprint, "SHA256:abc123");
+    assert!(ssh_data.public_key.is_some());
+}
+
+#[test]
+fn test_env_mapping_struct() {
+    use vaultic::models::EnvMapping;
+
+    let mapping = EnvMapping {
+        env_var: "AWS_ACCESS_KEY".to_string(),
+        field: "username".to_string(),
+    };
+
+    assert_eq!(mapping.env_var, "AWS_ACCESS_KEY");
+    assert_eq!(mapping.field, "username");
+}
+
+#[test]
+fn test_ssh_key_type_display() {
+    use vaultic::models::SshKeyType;
+
+    assert_eq!(format!("{}", SshKeyType::Ed25519), "ED25519");
+    assert_eq!(format!("{}", SshKeyType::Rsa), "RSA");
+    assert_eq!(format!("{}", SshKeyType::Ecdsa), "ECDSA");
+    assert_eq!(format!("{}", SshKeyType::Dsa), "DSA");
+    assert_eq!(format!("{}", SshKeyType::Unknown), "Unknown");
+}
+
+#[test]
+fn test_vault_entry_with_ssh_data() {
+    use vaultic::models::{SshKeyData, SshKeyType};
+
+    let mut entry = VaultEntry::new("Server SSH Key", EntryType::SshKey);
+
+    entry.ssh_key_data = Some(SshKeyData {
+        key_type: SshKeyType::Rsa,
+        fingerprint: "SHA256:xyz789".to_string(),
+        public_key: Some("ssh-rsa AAAA...".to_string()),
+        comment: Some("admin@server".to_string()),
+        bits: Some(4096),
+    });
+
+    assert!(entry.ssh_key_data.is_some());
+    let data = entry.ssh_key_data.as_ref().unwrap();
+    assert_eq!(data.key_type, SshKeyType::Rsa);
+    assert_eq!(data.bits, Some(4096));
+}
+
+#[test]
+fn test_vault_entry_with_env_mappings() {
+    use vaultic::models::EnvMapping;
+
+    let mut entry = VaultEntry::new("AWS Credentials", EntryType::Password)
+        .with_username("AKIAIOSFODNN7EXAMPLE")
+        .with_password("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+
+    entry.env_mappings = vec![
+        EnvMapping {
+            env_var: "AWS_ACCESS_KEY_ID".to_string(),
+            field: "username".to_string(),
+        },
+        EnvMapping {
+            env_var: "AWS_SECRET_ACCESS_KEY".to_string(),
+            field: "password".to_string(),
+        },
+    ];
+
+    assert_eq!(entry.env_mappings.len(), 2);
+    assert_eq!(entry.env_mappings[0].env_var, "AWS_ACCESS_KEY_ID");
+    assert_eq!(entry.env_mappings[1].field, "password");
+}

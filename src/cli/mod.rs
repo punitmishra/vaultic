@@ -290,6 +290,35 @@ pub enum Commands {
         apply: bool,
     },
 
+    /// Run a command with vault secrets as environment variables
+    Exec {
+        /// Entry name or ID to use for environment variables
+        entry: String,
+
+        /// Command to run (everything after --)
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+
+        /// Custom env var mapping (format: ENV_VAR=field_name, can be used multiple times)
+        #[arg(short = 'e', long = "env", value_name = "ENV_VAR=field")]
+        env_mappings: Vec<String>,
+
+        /// Only show the environment variables without running command
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Generate shell integration script
+    ShellInit {
+        /// Shell type
+        #[arg(value_enum)]
+        shell: ShellType,
+
+        /// Include FZF integration for fuzzy search
+        #[arg(long)]
+        fzf: bool,
+    },
+
     /// Export vault
     Export {
         /// Output file
@@ -634,6 +663,14 @@ pub enum ExportFormat {
     Encrypted,
     Json,
     Csv,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum ShellType {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -1677,6 +1714,144 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Output::info("Use --auto-tag, --analyze, or --check-breaches to get suggestions");
             }
 
+            Ok(())
+        }
+
+        Commands::Exec {
+            entry,
+            command,
+            env_mappings,
+            dry_run,
+        } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Find the entry
+            let entries = storage.list_entries()?;
+            let vault_entry = entries
+                .iter()
+                .find(|e| {
+                    e.name.to_lowercase() == entry.to_lowercase()
+                        || e.id.to_string() == entry
+                })
+                .ok_or_else(|| format!("Entry '{}' not found", entry))?;
+
+            // Build environment variables
+            let mut env_vars: Vec<(String, String)> = Vec::new();
+
+            // Default mappings based on entry fields
+            if let Some(ref username) = vault_entry.username {
+                env_vars.push(("VAULTIC_USERNAME".to_string(), username.clone()));
+            }
+            if let Some(ref password) = vault_entry.password {
+                env_vars.push(("VAULTIC_PASSWORD".to_string(), password.expose().to_string()));
+            }
+            if let Some(ref url) = vault_entry.url {
+                env_vars.push(("VAULTIC_URL".to_string(), url.clone()));
+            }
+
+            // Add custom fields
+            for field in &vault_entry.custom_fields {
+                let env_name = format!(
+                    "VAULTIC_{}",
+                    field.name.to_uppercase().replace([' ', '-'], "_")
+                );
+                env_vars.push((env_name, field.value.expose().to_string()));
+            }
+
+            // Add entry's env mappings
+            for mapping in &vault_entry.env_mappings {
+                let value = match mapping.field.as_str() {
+                    "password" => vault_entry.password.as_ref().map(|p| p.expose().to_string()),
+                    "username" => vault_entry.username.clone(),
+                    "url" => vault_entry.url.clone(),
+                    field_name => vault_entry
+                        .custom_fields
+                        .iter()
+                        .find(|f| f.name == field_name)
+                        .map(|f| f.value.expose().to_string()),
+                };
+                if let Some(val) = value {
+                    env_vars.push((mapping.env_var.clone(), val));
+                }
+            }
+
+            // Add CLI-specified mappings (override defaults)
+            for mapping in &env_mappings {
+                if let Some((env_var, field_name)) = mapping.split_once('=') {
+                    let value = match field_name {
+                        "password" => vault_entry.password.as_ref().map(|p| p.expose().to_string()),
+                        "username" => vault_entry.username.clone(),
+                        "url" => vault_entry.url.clone(),
+                        field_name => vault_entry
+                            .custom_fields
+                            .iter()
+                            .find(|f| f.name == field_name)
+                            .map(|f| f.value.expose().to_string()),
+                    };
+                    if let Some(val) = value {
+                        env_vars.push((env_var.to_string(), val));
+                    } else {
+                        Output::warning(&format!("Field '{}' not found in entry", field_name));
+                    }
+                } else {
+                    Output::warning(&format!("Invalid env mapping format '{}', expected ENV_VAR=field", mapping));
+                }
+            }
+
+            if dry_run {
+                Output::header("Environment Variables");
+                for (name, value) in &env_vars {
+                    // Mask passwords in output
+                    let display_value = if name.contains("PASSWORD") || name.contains("SECRET") || name.contains("KEY") {
+                        format!("{}...", &value.chars().take(4).collect::<String>())
+                    } else {
+                        value.clone()
+                    };
+                    Output::field(name, &display_value);
+                }
+                Output::info(&format!("Command: {}", command.join(" ")));
+                return Ok(());
+            }
+
+            if command.is_empty() {
+                return Err("No command specified. Use: vaultic exec <entry> -- <command>".into());
+            }
+
+            // Run the command with environment variables
+            let mut cmd = std::process::Command::new(&command[0]);
+            cmd.args(&command[1..]);
+            for (name, value) in &env_vars {
+                cmd.env(name, value);
+            }
+
+            let status = cmd.status().map_err(|e| format!("Failed to run command: {}", e))?;
+
+            if !status.success() {
+                if let Some(code) = status.code() {
+                    std::process::exit(code);
+                } else {
+                    return Err("Command terminated by signal".into());
+                }
+            }
+
+            Ok(())
+        }
+
+        Commands::ShellInit { shell, fzf } => {
+            let script = match shell {
+                ShellType::Bash => generate_bash_init(fzf),
+                ShellType::Zsh => generate_zsh_init(fzf),
+                ShellType::Fish => generate_fish_init(fzf),
+                ShellType::Powershell => generate_powershell_init(fzf),
+            };
+            println!("{}", script);
             Ok(())
         }
 
@@ -3137,6 +3312,247 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+}
+
+/// Generate bash shell init script
+fn generate_bash_init(fzf: bool) -> String {
+    let mut script = r#"# Vaultic shell integration for Bash
+# Add this to your ~/.bashrc:
+#   eval "$(vaultic shell-init bash)"
+
+# Aliases
+alias vu='vaultic unlock'
+alias vl='vaultic lock'
+alias vs='vaultic status'
+alias va='vaultic add'
+alias vg='vaultic get'
+alias vls='vaultic list'
+alias ve='vaultic exec'
+
+# Quick copy password to clipboard
+vcp() {
+    vaultic get "$1" --copy
+}
+
+# Quick search
+vsearch() {
+    vaultic search "$@"
+}
+
+# Run command with entry credentials
+vrun() {
+    local entry="$1"
+    shift
+    vaultic exec "$entry" -- "$@"
+}
+"#.to_string();
+
+    if fzf {
+        script.push_str(r#"
+# FZF integration (requires fzf)
+vf() {
+    local entry
+    entry=$(vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if [ -n "$entry" ]; then
+        vaultic get "$entry" --copy
+        echo "Password copied for: $entry"
+    fi
+}
+
+# FZF exec
+vfe() {
+    local entry
+    entry=$(vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if [ -n "$entry" ]; then
+        shift
+        vaultic exec "$entry" -- "$@"
+    fi
+}
+"#);
+    }
+
+    script
+}
+
+/// Generate zsh shell init script
+fn generate_zsh_init(fzf: bool) -> String {
+    let mut script = r#"# Vaultic shell integration for Zsh
+# Add this to your ~/.zshrc:
+#   eval "$(vaultic shell-init zsh)"
+
+# Aliases
+alias vu='vaultic unlock'
+alias vl='vaultic lock'
+alias vs='vaultic status'
+alias va='vaultic add'
+alias vg='vaultic get'
+alias vls='vaultic list'
+alias ve='vaultic exec'
+
+# Quick copy password to clipboard
+vcp() {
+    vaultic get "$1" --copy
+}
+
+# Quick search
+vsearch() {
+    vaultic search "$@"
+}
+
+# Run command with entry credentials
+vrun() {
+    local entry="$1"
+    shift
+    vaultic exec "$entry" -- "$@"
+}
+
+# Completion
+if type compdef &>/dev/null; then
+    _vaultic_entries() {
+        local entries
+        entries=(${(f)"$(vaultic list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null)"})
+        _describe 'entries' entries
+    }
+    compdef _vaultic_entries vg vcp vrun
+fi
+"#.to_string();
+
+    if fzf {
+        script.push_str(r#"
+# FZF integration (requires fzf)
+vf() {
+    local entry
+    entry=$(vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if [[ -n "$entry" ]]; then
+        vaultic get "$entry" --copy
+        echo "Password copied for: $entry"
+    fi
+}
+
+# FZF exec
+vfe() {
+    local entry
+    entry=$(vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if [[ -n "$entry" ]]; then
+        shift
+        vaultic exec "$entry" -- "$@"
+    fi
+}
+"#);
+    }
+
+    script
+}
+
+/// Generate fish shell init script
+fn generate_fish_init(fzf: bool) -> String {
+    let mut script = r#"# Vaultic shell integration for Fish
+# Add this to your ~/.config/fish/config.fish:
+#   vaultic shell-init fish | source
+
+# Aliases
+alias vu='vaultic unlock'
+alias vl='vaultic lock'
+alias vs='vaultic status'
+alias va='vaultic add'
+alias vg='vaultic get'
+alias vls='vaultic list'
+alias ve='vaultic exec'
+
+# Quick copy password to clipboard
+function vcp
+    vaultic get $argv[1] --copy
+end
+
+# Quick search
+function vsearch
+    vaultic search $argv
+end
+
+# Run command with entry credentials
+function vrun
+    set entry $argv[1]
+    set -e argv[1]
+    vaultic exec $entry -- $argv
+end
+"#.to_string();
+
+    if fzf {
+        script.push_str(r#"
+# FZF integration (requires fzf)
+function vf
+    set entry (vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if test -n "$entry"
+        vaultic get "$entry" --copy
+        echo "Password copied for: $entry"
+    end
+end
+
+# FZF exec
+function vfe
+    set entry (vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
+    if test -n "$entry"
+        set -e argv[1]
+        vaultic exec "$entry" -- $argv
+    end
+end
+"#);
+    }
+
+    script
+}
+
+/// Generate PowerShell init script
+fn generate_powershell_init(fzf: bool) -> String {
+    let mut script = r#"# Vaultic shell integration for PowerShell
+# Add this to your $PROFILE:
+#   Invoke-Expression (vaultic shell-init powershell)
+
+# Aliases
+Set-Alias -Name vu -Value { vaultic unlock }
+Set-Alias -Name vl -Value { vaultic lock }
+Set-Alias -Name vs -Value { vaultic status }
+Set-Alias -Name va -Value { vaultic add }
+Set-Alias -Name vg -Value { vaultic get }
+Set-Alias -Name vls -Value { vaultic list }
+Set-Alias -Name ve -Value { vaultic exec }
+
+# Quick copy password to clipboard
+function vcp {
+    param([string]$Entry)
+    vaultic get $Entry --copy
+}
+
+# Quick search
+function vsearch {
+    vaultic search @args
+}
+
+# Run command with entry credentials
+function vrun {
+    param(
+        [string]$Entry,
+        [Parameter(ValueFromRemainingArguments)]
+        [string[]]$Command
+    )
+    vaultic exec $Entry -- @Command
+}
+"#.to_string();
+
+    if fzf {
+        script.push_str(r#"
+# FZF integration (requires fzf)
+function vf {
+    $entry = vaultic list --json 2>$null | ConvertFrom-Json | ForEach-Object { $_.name } | fzf --prompt="Select entry: "
+    if ($entry) {
+        vaultic get $entry --copy
+        Write-Host "Password copied for: $entry"
+    }
+}
+"#);
+    }
+
+    script
 }
 
 #[cfg(test)]

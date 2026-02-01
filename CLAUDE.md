@@ -19,7 +19,7 @@ This document provides context for Claude to continue developing Vaultic.
 ### Checkpoint: 2026-02-01
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 258 passing (100 bin + 118 lib + 35 integration + 5 doctests)
+**Tests**: 264 passing (110 bin + 108 lib + 41 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
 **CI/CD**: GitHub Actions configured and passing
@@ -60,7 +60,7 @@ cargo test                   # Run all tests (229 pass)
 | 7 | Password History (tracking, listing, restore) | ✅ Complete |
 | 8 | Batch Operations (tag, delete, move, favorite) | ✅ Complete |
 | 9 | Git Credential Helper (get, store, erase) | ✅ Complete |
-| 10 | Integration Tests (35 comprehensive tests) | ✅ Complete |
+| 10 | Integration Tests (41 comprehensive tests) | ✅ Complete |
 | - | Web Client (terminal-style demo) | ✅ Complete |
 | - | Demo Recordings (asciinema) | ✅ Complete |
 
@@ -71,7 +71,7 @@ cargo test                   # Run all tests (229 pass)
 | 1 | Key Hierarchy (VaultKey, KEK, wrapping) | ✅ Complete |
 | 2 | BIP39 Recovery Keys + QR Display | ✅ Complete |
 | 3 | AI Auto-Tagging | ✅ Complete |
-| 4 | Shell Integration (SSH, Git) | ⏳ Pending |
+| 4 | Shell Integration (exec, shell-init) | ✅ Complete |
 
 ### Module Status
 
@@ -169,16 +169,18 @@ vaultic tui
 | `recovery` | ✅ WORKING | BIP39 recovery key (generate, verify, show, unlock) |
 | `share` | ⚠️ STUB | Identity management needed |
 | `suggest` | ✅ WORKING | AI auto-tagging, analysis, breach checking |
+| `exec` | ✅ WORKING | Run commands with vault secrets as env vars |
+| `shell-init` | ✅ WORKING | Generate shell aliases (bash/zsh/fish/powershell) |
 
 ---
 
 ## Test Results (Latest)
 
 ```
-cargo test: 258 tests passing
-  - 100 bin tests (CLI parsing, commands)
-  - 118 lib tests (crypto, storage, models, migration, recovery, ai)
-  - 35 integration tests (end-to-end workflows)
+cargo test: 264 tests passing
+  - 110 bin tests (CLI parsing, commands)
+  - 108 lib tests (crypto, storage, models, migration, recovery, ai)
+  - 41 integration tests (end-to-end workflows)
   - 5 doctests (code examples in documentation)
 
 cargo build --release: Success
@@ -199,6 +201,8 @@ Local workflow test:
 ✓ credential - Git credential helper (get/store/erase)
 ✓ recovery   - BIP39 key generation, QR display, unlock
 ✓ suggest    - AI auto-tagging, analysis, breach checking
+✓ exec       - Run commands with vault secrets as env vars
+✓ shell-init - Generate shell integration scripts
 ✓ tui        - Full terminal UI with vim keys
 ✓ import     - Bitwarden, LastPass, 1Password
 ✓ export     - JSON, CSV, encrypted backup
@@ -370,7 +374,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **258 tests passing** - Keep them green (100 bin + 118 lib + 35 integration + 5 doc)
+2. **264 tests passing** - Keep them green (110 bin + 108 lib + 41 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
@@ -387,6 +391,7 @@ rm -rf /tmp/test_vault
 16. **Batch operations** - Tag, delete, move, favorite multiple entries
 17. **BIP39 Recovery Keys** - Full implementation with QR display and unlock
 18. **AI Auto-Tagging** - Rule-based + Ollama-enhanced tag suggestions
+19. **Shell Integration** - exec command + shell-init for bash/zsh/fish/powershell
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)

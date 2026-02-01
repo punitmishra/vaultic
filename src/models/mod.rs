@@ -201,6 +201,53 @@ pub struct CustomField {
     pub is_hidden: bool,
 }
 
+/// SSH key type enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SshKeyType {
+    Ed25519,
+    Rsa,
+    Ecdsa,
+    Dsa,
+    Unknown,
+}
+
+impl std::fmt::Display for SshKeyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ed25519 => write!(f, "ED25519"),
+            Self::Rsa => write!(f, "RSA"),
+            Self::Ecdsa => write!(f, "ECDSA"),
+            Self::Dsa => write!(f, "DSA"),
+            Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+/// SSH key metadata for SshKey entry types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshKeyData {
+    /// Key type (ed25519, rsa, ecdsa, etc.)
+    pub key_type: SshKeyType,
+    /// Public key fingerprint (SHA256)
+    pub fingerprint: String,
+    /// Public key in OpenSSH format
+    pub public_key: Option<String>,
+    /// Key comment (usually user@host)
+    pub comment: Option<String>,
+    /// Key bit size (for RSA/ECDSA)
+    pub bits: Option<u32>,
+}
+
+/// Environment variable mapping for exec command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvMapping {
+    /// Environment variable name
+    pub env_var: String,
+    /// Field to map (password, username, url, or custom field name)
+    pub field: String,
+}
+
 /// A historical password entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasswordHistoryEntry {
@@ -235,6 +282,12 @@ pub struct VaultEntry {
     /// Password history (last N passwords)
     #[serde(default)]
     pub password_history: Vec<PasswordHistoryEntry>,
+    /// SSH key metadata (for SshKey entry types)
+    #[serde(default)]
+    pub ssh_key_data: Option<SshKeyData>,
+    /// Environment variable mappings for exec command
+    #[serde(default)]
+    pub env_mappings: Vec<EnvMapping>,
 }
 
 /// Maximum number of passwords to keep in history
@@ -264,6 +317,8 @@ impl VaultEntry {
             rotation_days: Some(90), // Default 90-day rotation
             shared_with: Vec::new(),
             password_history: Vec::new(),
+            ssh_key_data: None,
+            env_mappings: Vec::new(),
         }
     }
 
