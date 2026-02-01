@@ -6,6 +6,7 @@
 //! - Duplicate password detection
 //! - Organization suggestions
 //! - Breach checking
+//! - Auto-tagging entries based on URL, name, and type
 //!
 //! Supports both local (Ollama/llama.cpp) and cloud (encrypted) backends.
 
@@ -488,6 +489,454 @@ Common tags: {:?}"#,
         // Could query AI for site-specific requirements, but for now just generate
         generator.generate()
     }
+
+    /// Suggest tags for an entry based on URL, name, and type (rule-based)
+    pub fn suggest_tags(entry: &VaultEntry) -> Vec<String> {
+        let mut tags = Vec::new();
+
+        // URL-based tag suggestions
+        if let Some(url) = &entry.url {
+            let url_lower = url.to_lowercase();
+            tags.extend(Self::tags_from_url(&url_lower));
+        }
+
+        // Name-based tag suggestions
+        let name_lower = entry.name.to_lowercase();
+        tags.extend(Self::tags_from_name(&name_lower));
+
+        // Entry type-based tag suggestions
+        tags.extend(Self::tags_from_entry_type(&entry.entry_type));
+
+        // Username-based suggestions
+        if let Some(username) = &entry.username {
+            tags.extend(Self::tags_from_username(username));
+        }
+
+        // Deduplicate and sort
+        tags.sort();
+        tags.dedup();
+
+        // Remove tags that are already present on the entry
+        tags.retain(|tag| !entry.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)));
+
+        tags
+    }
+
+    /// Suggest tags with AI enhancement (async, uses Ollama if available)
+    pub async fn suggest_tags_with_ai(&self, entry: &VaultEntry) -> Vec<String> {
+        // Start with rule-based suggestions
+        let mut tags = Self::suggest_tags(entry);
+
+        // Try AI enhancement if enabled
+        if self.config.enable_suggestions {
+            if let Ok(ai_tags) = self.query_tags_from_ai(entry).await {
+                for tag in ai_tags {
+                    let tag_lower = tag.to_lowercase();
+                    if !tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_lower))
+                        && !entry.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_lower))
+                    {
+                        tags.push(tag_lower);
+                    }
+                }
+            }
+        }
+
+        tags.sort();
+        tags.dedup();
+        tags
+    }
+
+    /// Query AI for tag suggestions
+    async fn query_tags_from_ai(&self, entry: &VaultEntry) -> AiResult<Vec<String>> {
+        match &self.config.backend {
+            AiBackend::Ollama { url, model } => {
+                let prompt = format!(
+                    r#"Suggest 2-3 single-word or hyphenated tags for categorizing this password vault entry:
+Name: {}
+URL: {}
+Type: {}
+
+Respond with ONLY a JSON array of lowercase tag strings, nothing else. Example: ["finance", "shopping"]"#,
+                    entry.name,
+                    entry.url.as_deref().unwrap_or("none"),
+                    entry.entry_type
+                );
+
+                let request = OllamaRequest {
+                    model: model.to_string(),
+                    prompt,
+                    stream: false,
+                };
+
+                let response = self
+                    .client
+                    .post(format!("{}/api/generate", url))
+                    .json(&request)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send()
+                    .await
+                    .map_err(|e| AiError::RequestFailed(e.to_string()))?;
+
+                if !response.status().is_success() {
+                    return Err(AiError::BackendUnavailable("Ollama unavailable".to_string()));
+                }
+
+                let ollama_response: OllamaResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| AiError::InvalidResponse(e.to_string()))?;
+
+                Self::parse_tag_response(&ollama_response.response)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Parse AI tag response
+    fn parse_tag_response(response: &str) -> AiResult<Vec<String>> {
+        // Try to extract JSON array from response
+        let json_start = response.find('[').unwrap_or(0);
+        let json_end = response.rfind(']').map(|i| i + 1).unwrap_or(response.len());
+        let json_str = &response[json_start..json_end];
+
+        serde_json::from_str::<Vec<String>>(json_str)
+            .map_err(|e| AiError::InvalidResponse(e.to_string()))
+    }
+
+    /// Extract tags from URL patterns
+    fn tags_from_url(url: &str) -> Vec<String> {
+        let mut tags = Vec::new();
+
+        // Development & Code
+        if url.contains("github.com") || url.contains("gitlab.com") || url.contains("bitbucket.org")
+        {
+            tags.push("development".to_string());
+            tags.push("git".to_string());
+        }
+        if url.contains("stackoverflow.com") || url.contains("stackexchange.com") {
+            tags.push("development".to_string());
+        }
+        if url.contains("npmjs.com") || url.contains("crates.io") || url.contains("pypi.org") {
+            tags.push("development".to_string());
+            tags.push("packages".to_string());
+        }
+
+        // Cloud & Infrastructure
+        if url.contains("aws.amazon.com") || url.contains("console.aws") {
+            tags.push("cloud".to_string());
+            tags.push("aws".to_string());
+        }
+        if url.contains("cloud.google.com") || url.contains("console.cloud.google") {
+            tags.push("cloud".to_string());
+            tags.push("gcp".to_string());
+        }
+        if url.contains("azure.microsoft.com") || url.contains("portal.azure") {
+            tags.push("cloud".to_string());
+            tags.push("azure".to_string());
+        }
+        if url.contains("digitalocean.com") {
+            tags.push("cloud".to_string());
+            tags.push("hosting".to_string());
+        }
+        if url.contains("heroku.com") || url.contains("vercel.com") || url.contains("netlify.com") {
+            tags.push("cloud".to_string());
+            tags.push("hosting".to_string());
+        }
+
+        // Social Media
+        if url.contains("twitter.com")
+            || url.contains("x.com")
+            || url.contains("facebook.com")
+            || url.contains("instagram.com")
+            || url.contains("linkedin.com")
+            || url.contains("tiktok.com")
+            || url.contains("reddit.com")
+            || url.contains("mastodon")
+        {
+            tags.push("social-media".to_string());
+        }
+
+        // Email
+        if url.contains("gmail.com")
+            || url.contains("mail.google")
+            || url.contains("outlook.com")
+            || url.contains("mail.yahoo")
+            || url.contains("protonmail")
+            || url.contains("proton.me")
+            || url.contains("fastmail")
+        {
+            tags.push("email".to_string());
+        }
+
+        // Finance & Banking
+        if url.contains("paypal.com")
+            || url.contains("stripe.com")
+            || url.contains("square.com")
+            || url.contains("venmo.com")
+        {
+            tags.push("finance".to_string());
+            tags.push("payment".to_string());
+        }
+        if url.contains("bank")
+            || url.contains("chase.com")
+            || url.contains("wellsfargo.com")
+            || url.contains("bankofamerica.com")
+            || url.contains("capitalone.com")
+        {
+            tags.push("finance".to_string());
+            tags.push("banking".to_string());
+        }
+        if url.contains("coinbase.com")
+            || url.contains("binance.com")
+            || url.contains("kraken.com")
+        {
+            tags.push("finance".to_string());
+            tags.push("crypto".to_string());
+        }
+
+        // Shopping
+        if url.contains("amazon.com")
+            || url.contains("ebay.com")
+            || url.contains("etsy.com")
+            || url.contains("walmart.com")
+            || url.contains("target.com")
+            || url.contains("bestbuy.com")
+        {
+            tags.push("shopping".to_string());
+        }
+
+        // Entertainment & Streaming
+        if url.contains("netflix.com")
+            || url.contains("hulu.com")
+            || url.contains("disneyplus.com")
+            || url.contains("hbomax.com")
+            || url.contains("primevideo.com")
+            || url.contains("youtube.com")
+            || url.contains("twitch.tv")
+            || url.contains("spotify.com")
+            || url.contains("apple.com/music")
+        {
+            tags.push("entertainment".to_string());
+            tags.push("streaming".to_string());
+        }
+
+        // Gaming
+        if url.contains("steam")
+            || url.contains("epicgames.com")
+            || url.contains("playstation.com")
+            || url.contains("xbox.com")
+            || url.contains("nintendo.com")
+            || url.contains("battle.net")
+            || url.contains("gog.com")
+        {
+            tags.push("gaming".to_string());
+        }
+
+        // Travel
+        if url.contains("airbnb.com")
+            || url.contains("booking.com")
+            || url.contains("expedia.com")
+            || url.contains("hotels.com")
+            || url.contains("kayak.com")
+            || url.contains("united.com")
+            || url.contains("delta.com")
+            || url.contains("southwest.com")
+        {
+            tags.push("travel".to_string());
+        }
+
+        // Productivity & Work
+        if url.contains("slack.com")
+            || url.contains("discord.com")
+            || url.contains("zoom.us")
+            || url.contains("teams.microsoft")
+        {
+            tags.push("communication".to_string());
+            tags.push("work".to_string());
+        }
+        if url.contains("notion.so")
+            || url.contains("trello.com")
+            || url.contains("asana.com")
+            || url.contains("monday.com")
+            || url.contains("jira")
+            || url.contains("atlassian.com")
+        {
+            tags.push("productivity".to_string());
+            tags.push("work".to_string());
+        }
+        if url.contains("docs.google.com")
+            || url.contains("drive.google.com")
+            || url.contains("dropbox.com")
+            || url.contains("onedrive")
+            || url.contains("box.com")
+        {
+            tags.push("productivity".to_string());
+            tags.push("storage".to_string());
+        }
+
+        // Education
+        if url.contains("coursera.org")
+            || url.contains("udemy.com")
+            || url.contains("edx.org")
+            || url.contains("khanacademy.org")
+            || url.contains(".edu")
+        {
+            tags.push("education".to_string());
+        }
+
+        // News & Media
+        if url.contains("nytimes.com")
+            || url.contains("washingtonpost.com")
+            || url.contains("bbc.com")
+            || url.contains("cnn.com")
+            || url.contains("reuters.com")
+            || url.contains("medium.com")
+            || url.contains("substack.com")
+        {
+            tags.push("news".to_string());
+        }
+
+        // Health
+        if url.contains("health")
+            || url.contains("medical")
+            || url.contains("doctor")
+            || url.contains("pharmacy")
+            || url.contains("hospital")
+        {
+            tags.push("health".to_string());
+        }
+
+        tags
+    }
+
+    /// Extract tags from entry name
+    fn tags_from_name(name: &str) -> Vec<String> {
+        let mut tags = Vec::new();
+
+        // Development
+        if name.contains("github")
+            || name.contains("gitlab")
+            || name.contains("bitbucket")
+            || name.contains("docker")
+            || name.contains("kubernetes")
+            || name.contains("jenkins")
+        {
+            tags.push("development".to_string());
+        }
+
+        // Cloud
+        if name.contains("aws")
+            || name.contains("amazon web")
+            || name.contains("gcp")
+            || name.contains("google cloud")
+            || name.contains("azure")
+        {
+            tags.push("cloud".to_string());
+        }
+
+        // Email
+        if name.contains("gmail")
+            || name.contains("outlook")
+            || name.contains("email")
+            || name.contains("mail")
+            || name.contains("proton")
+        {
+            tags.push("email".to_string());
+        }
+
+        // Social
+        if name.contains("twitter")
+            || name.contains("facebook")
+            || name.contains("instagram")
+            || name.contains("linkedin")
+            || name.contains("tiktok")
+            || name.contains("reddit")
+        {
+            tags.push("social-media".to_string());
+        }
+
+        // Finance
+        if name.contains("bank")
+            || name.contains("paypal")
+            || name.contains("stripe")
+            || name.contains("venmo")
+            || name.contains("crypto")
+            || name.contains("coinbase")
+        {
+            tags.push("finance".to_string());
+        }
+
+        // Work indicators
+        if name.contains("work") || name.contains("office") || name.contains("corporate") {
+            tags.push("work".to_string());
+        }
+
+        // Personal indicators
+        if name.contains("personal") || name.contains("home") || name.contains("private") {
+            tags.push("personal".to_string());
+        }
+
+        // VPN & Security
+        if name.contains("vpn")
+            || name.contains("nordvpn")
+            || name.contains("expressvpn")
+            || name.contains("1password")
+            || name.contains("lastpass")
+            || name.contains("bitwarden")
+        {
+            tags.push("security".to_string());
+        }
+
+        tags
+    }
+
+    /// Extract tags from entry type
+    fn tags_from_entry_type(entry_type: &crate::models::EntryType) -> Vec<String> {
+        use crate::models::EntryType;
+        match entry_type {
+            EntryType::CreditCard => vec!["finance".to_string(), "payment".to_string()],
+            EntryType::SshKey => vec!["development".to_string(), "infrastructure".to_string()],
+            EntryType::ApiKey => vec!["development".to_string(), "api".to_string()],
+            EntryType::Identity => vec!["personal".to_string(), "identity".to_string()],
+            EntryType::SecureNote => vec!["notes".to_string()],
+            EntryType::Totp => vec!["2fa".to_string(), "security".to_string()],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Extract tags from username patterns
+    fn tags_from_username(username: &str) -> Vec<String> {
+        let mut tags = Vec::new();
+        let username_lower = username.to_lowercase();
+
+        // Work email patterns
+        if username_lower.contains("@work")
+            || username_lower.contains("corp.")
+            || username_lower.contains("company")
+            || username_lower.contains(".org")
+            || username_lower.ends_with(".com")
+                && !username_lower.contains("gmail")
+                && !username_lower.contains("yahoo")
+                && !username_lower.contains("hotmail")
+                && !username_lower.contains("outlook")
+                && !username_lower.contains("proton")
+        {
+            // Might be a work email
+        }
+
+        // Common personal email providers
+        if username_lower.contains("@gmail")
+            || username_lower.contains("@yahoo")
+            || username_lower.contains("@hotmail")
+            || username_lower.contains("@outlook")
+            || username_lower.contains("@proton")
+            || username_lower.contains("@icloud")
+        {
+            tags.push("personal".to_string());
+        }
+
+        tags
+    }
 }
 
 /// Ollama API request
@@ -588,5 +1037,104 @@ mod tests {
         let summary = ai.prepare_safe_summary(&entries);
         assert!(!summary.contains("super_secret"));
         assert!(summary.contains("Total entries: 1"));
+    }
+
+    #[test]
+    fn test_suggest_tags_github() {
+        let entry = VaultEntry::new("GitHub Account", crate::models::EntryType::Password)
+            .with_url("https://github.com/user");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"development".to_string()));
+        assert!(tags.contains(&"git".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_social_media() {
+        let entry = VaultEntry::new("Twitter", crate::models::EntryType::Password)
+            .with_url("https://twitter.com/user");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"social-media".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_finance() {
+        let entry = VaultEntry::new("PayPal", crate::models::EntryType::Password)
+            .with_url("https://www.paypal.com");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"finance".to_string()));
+        assert!(tags.contains(&"payment".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_credit_card() {
+        let entry = VaultEntry::new("Visa Card", crate::models::EntryType::CreditCard);
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"finance".to_string()));
+        assert!(tags.contains(&"payment".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_ssh_key() {
+        let entry = VaultEntry::new("Server SSH Key", crate::models::EntryType::SshKey);
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"development".to_string()));
+        assert!(tags.contains(&"infrastructure".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_api_key() {
+        let entry = VaultEntry::new("Stripe API Key", crate::models::EntryType::ApiKey)
+            .with_url("https://dashboard.stripe.com");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"api".to_string()));
+        assert!(tags.contains(&"finance".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_no_duplicates() {
+        let entry = VaultEntry::new("GitHub", crate::models::EntryType::Password)
+            .with_url("https://github.com")
+            .with_tags(vec!["development".to_string()]);
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        // Should not suggest "development" since it's already in tags
+        assert!(!tags.contains(&"development".to_string()));
+        // But should still suggest git
+        assert!(tags.contains(&"git".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_email() {
+        let entry = VaultEntry::new("Gmail", crate::models::EntryType::Password)
+            .with_url("https://mail.google.com");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"email".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_cloud() {
+        let entry = VaultEntry::new("AWS Console", crate::models::EntryType::Password)
+            .with_url("https://console.aws.amazon.com");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"cloud".to_string()));
+        assert!(tags.contains(&"aws".to_string()));
+    }
+
+    #[test]
+    fn test_suggest_tags_streaming() {
+        let entry = VaultEntry::new("Netflix", crate::models::EntryType::Password)
+            .with_url("https://www.netflix.com");
+
+        let tags = PasswordAi::suggest_tags(&entry);
+        assert!(tags.contains(&"entertainment".to_string()));
+        assert!(tags.contains(&"streaming".to_string()));
     }
 }

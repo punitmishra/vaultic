@@ -452,3 +452,135 @@ fn test_recovery_key_display_formatted() {
     // Should be multi-line
     assert!(display.lines().count() > 1);
 }
+
+// ============================================================================
+// AI Auto-Tagging Tests
+// ============================================================================
+
+#[test]
+fn test_auto_tag_github_url() {
+    use vaultic::ai::PasswordAi;
+
+    let entry = VaultEntry::new("My GitHub", EntryType::Password)
+        .with_url("https://github.com/user/repo");
+
+    let tags = PasswordAi::suggest_tags(&entry);
+    assert!(tags.contains(&"development".to_string()));
+    assert!(tags.contains(&"git".to_string()));
+}
+
+#[test]
+fn test_auto_tag_social_media() {
+    use vaultic::ai::PasswordAi;
+
+    let entry =
+        VaultEntry::new("Twitter Account", EntryType::Password).with_url("https://twitter.com");
+
+    let tags = PasswordAi::suggest_tags(&entry);
+    assert!(tags.contains(&"social-media".to_string()));
+}
+
+#[test]
+fn test_auto_tag_finance() {
+    use vaultic::ai::PasswordAi;
+
+    let entry =
+        VaultEntry::new("PayPal", EntryType::Password).with_url("https://www.paypal.com/myaccount");
+
+    let tags = PasswordAi::suggest_tags(&entry);
+    assert!(tags.contains(&"finance".to_string()));
+    assert!(tags.contains(&"payment".to_string()));
+}
+
+#[test]
+fn test_auto_tag_credit_card_type() {
+    use vaultic::ai::PasswordAi;
+
+    let entry = VaultEntry::new("Visa Gold Card", EntryType::CreditCard);
+
+    let tags = PasswordAi::suggest_tags(&entry);
+    assert!(tags.contains(&"finance".to_string()));
+    assert!(tags.contains(&"payment".to_string()));
+}
+
+#[test]
+fn test_auto_tag_ssh_key_type() {
+    use vaultic::ai::PasswordAi;
+
+    let entry = VaultEntry::new("Production Server", EntryType::SshKey);
+
+    let tags = PasswordAi::suggest_tags(&entry);
+    assert!(tags.contains(&"development".to_string()));
+    assert!(tags.contains(&"infrastructure".to_string()));
+}
+
+#[test]
+fn test_auto_tag_cloud_providers() {
+    use vaultic::ai::PasswordAi;
+
+    let aws_entry = VaultEntry::new("AWS Console", EntryType::Password)
+        .with_url("https://console.aws.amazon.com");
+    let gcp_entry = VaultEntry::new("GCP", EntryType::Password)
+        .with_url("https://console.cloud.google.com");
+    let azure_entry =
+        VaultEntry::new("Azure Portal", EntryType::Password).with_url("https://portal.azure.com");
+
+    let aws_tags = PasswordAi::suggest_tags(&aws_entry);
+    let gcp_tags = PasswordAi::suggest_tags(&gcp_entry);
+    let azure_tags = PasswordAi::suggest_tags(&azure_entry);
+
+    assert!(aws_tags.contains(&"cloud".to_string()));
+    assert!(aws_tags.contains(&"aws".to_string()));
+    assert!(gcp_tags.contains(&"cloud".to_string()));
+    assert!(gcp_tags.contains(&"gcp".to_string()));
+    assert!(azure_tags.contains(&"cloud".to_string()));
+    assert!(azure_tags.contains(&"azure".to_string()));
+}
+
+#[test]
+fn test_auto_tag_excludes_existing() {
+    use vaultic::ai::PasswordAi;
+
+    let entry = VaultEntry::new("GitHub", EntryType::Password)
+        .with_url("https://github.com")
+        .with_tags(vec!["development".to_string(), "git".to_string()]);
+
+    let tags = PasswordAi::suggest_tags(&entry);
+
+    // Should not suggest tags that already exist
+    assert!(!tags.contains(&"development".to_string()));
+    assert!(!tags.contains(&"git".to_string()));
+}
+
+#[test]
+fn test_auto_tag_email_services() {
+    use vaultic::ai::PasswordAi;
+
+    let gmail_entry =
+        VaultEntry::new("Gmail", EntryType::Password).with_url("https://mail.google.com");
+    let outlook_entry =
+        VaultEntry::new("Outlook", EntryType::Password).with_url("https://outlook.com");
+
+    let gmail_tags = PasswordAi::suggest_tags(&gmail_entry);
+    let outlook_tags = PasswordAi::suggest_tags(&outlook_entry);
+
+    assert!(gmail_tags.contains(&"email".to_string()));
+    assert!(outlook_tags.contains(&"email".to_string()));
+}
+
+#[test]
+fn test_auto_tag_streaming() {
+    use vaultic::ai::PasswordAi;
+
+    let netflix_entry =
+        VaultEntry::new("Netflix", EntryType::Password).with_url("https://www.netflix.com");
+    let spotify_entry =
+        VaultEntry::new("Spotify", EntryType::Password).with_url("https://www.spotify.com");
+
+    let netflix_tags = PasswordAi::suggest_tags(&netflix_entry);
+    let spotify_tags = PasswordAi::suggest_tags(&spotify_entry);
+
+    assert!(netflix_tags.contains(&"entertainment".to_string()));
+    assert!(netflix_tags.contains(&"streaming".to_string()));
+    assert!(spotify_tags.contains(&"entertainment".to_string()));
+}

@@ -125,6 +125,10 @@ pub enum Commands {
         /// Notes
         #[arg(short, long)]
         notes: Option<String>,
+
+        /// Auto-suggest tags based on entry name, URL, and type
+        #[arg(long)]
+        auto_tag: bool,
     },
 
     /// Get/show an entry
@@ -276,6 +280,14 @@ pub enum Commands {
         /// Check for breached passwords
         #[arg(long)]
         check_breaches: bool,
+
+        /// Auto-tag entries based on URL, name, and type
+        #[arg(long)]
+        auto_tag: bool,
+
+        /// Apply suggested tags without confirmation
+        #[arg(long)]
+        apply: bool,
     },
 
     /// Export vault
@@ -1221,6 +1233,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             favorite,
             fields,
             notes,
+            auto_tag,
         } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
@@ -1268,10 +1281,24 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 entry = entry.with_url(u);
             }
             // Parse tags from comma-separated string
-            let tag_list: Vec<String> = tags
+            let mut tag_list: Vec<String> = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
-            entry = entry.with_tags(tag_list);
+
+            // Auto-suggest tags if enabled
+            if auto_tag {
+                entry = entry.with_tags(tag_list.clone());
+                let suggested_tags = crate::ai::PasswordAi::suggest_tags(&entry);
+                if !suggested_tags.is_empty() {
+                    Output::info(&format!(
+                        "Auto-suggested tags: {}",
+                        suggested_tags.join(", ")
+                    ));
+                    tag_list.extend(suggested_tags);
+                }
+            }
+
+            entry = entry.with_tags(tag_list.clone());
             entry.folder = folder;
             entry.favorite = favorite;
 
@@ -1307,6 +1334,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(u) = &url {
                 Output::field("URL", u);
+            }
+            if !tag_list.is_empty() {
+                Output::field("Tags", &tag_list.join(", "));
             }
             if !entry.custom_fields.is_empty() {
                 Output::field("Custom fields", &entry.custom_fields.len().to_string());
@@ -1466,15 +1496,187 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Suggest {
             analyze,
             check_breaches,
+            auto_tag,
+            apply,
         } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+            let entries = storage.list_entries()?;
+
+            if entries.is_empty() {
+                Output::info("Vault is empty. Add some entries first.");
+                return Ok(());
+            }
+
             Output::header("AI Suggestions");
+
+            // Auto-tagging analysis
+            if auto_tag {
+                Output::info("Analyzing entries for tag suggestions...");
+                println!();
+
+                let mut entries_to_update: Vec<(crate::models::VaultEntry, Vec<String>)> =
+                    Vec::new();
+
+                for entry in &entries {
+                    let suggested_tags = crate::ai::PasswordAi::suggest_tags(entry);
+                    if !suggested_tags.is_empty() {
+                        entries_to_update.push((entry.clone(), suggested_tags));
+                    }
+                }
+
+                if entries_to_update.is_empty() {
+                    Output::success("All entries are already well-tagged!");
+                } else {
+                    Output::info(&format!(
+                        "Found {} entries that could use additional tags:",
+                        entries_to_update.len()
+                    ));
+                    println!();
+
+                    for (entry, suggested_tags) in &entries_to_update {
+                        println!(
+                            "  {} {} → {}",
+                            "•".bright_blue(),
+                            entry.name.bright_white(),
+                            suggested_tags.join(", ").bright_cyan()
+                        );
+                        if !entry.tags.is_empty() {
+                            println!(
+                                "    Current tags: {}",
+                                entry.tags.join(", ").dimmed()
+                            );
+                        }
+                    }
+
+                    println!();
+
+                    // Apply if requested or prompt
+                    let should_apply = apply
+                        || Prompts::confirm(
+                            &format!("Apply tags to {} entries?", entries_to_update.len()),
+                            false,
+                        )?;
+
+                    if should_apply {
+                        let mut updated_count = 0;
+                        for (mut entry, suggested_tags) in entries_to_update {
+                            for tag in suggested_tags {
+                                if !entry.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag)) {
+                                    entry.tags.push(tag);
+                                }
+                            }
+                            entry.updated_at = chrono::Utc::now();
+                            storage.update_entry(&entry)?;
+                            updated_count += 1;
+                        }
+                        Output::success(&format!("Updated tags on {} entries", updated_count));
+                    } else {
+                        Output::info("No changes applied.");
+                    }
+                }
+            }
+
+            // Run general analysis if requested
             if analyze {
-                Output::info("Analyzing vault...");
+                println!();
+                Output::info("Running vault analysis...");
+
+                let ai = crate::ai::PasswordAi::new(crate::ai::AiConfig {
+                    check_breaches,
+                    ..Default::default()
+                });
+
+                // Use tokio runtime for async operations
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+                let suggestions = rt.block_on(ai.analyze_vault(&entries));
+
+                if suggestions.is_empty() {
+                    Output::success("No issues found. Your vault looks great!");
+                } else {
+                    println!();
+                    Output::warning(&format!("Found {} suggestions:", suggestions.len()));
+                    println!();
+
+                    for suggestion in suggestions {
+                        let priority_color = match suggestion.priority {
+                            crate::models::SuggestionPriority::Critical => "red",
+                            crate::models::SuggestionPriority::High => "yellow",
+                            crate::models::SuggestionPriority::Medium => "cyan",
+                            crate::models::SuggestionPriority::Low => "dimmed",
+                        };
+                        let priority_str = format!("[{:?}]", suggestion.priority);
+                        println!(
+                            "  {} {} {}",
+                            "•".bright_blue(),
+                            match priority_color {
+                                "red" => priority_str.bright_red().to_string(),
+                                "yellow" => priority_str.bright_yellow().to_string(),
+                                "cyan" => priority_str.bright_cyan().to_string(),
+                                _ => priority_str.dimmed().to_string(),
+                            },
+                            suggestion.message
+                        );
+                    }
+                }
             }
-            if check_breaches {
-                Output::info("Checking for breached passwords...");
+
+            // Check breaches if requested (and not already done by analyze)
+            if check_breaches && !analyze {
+                println!();
+                Output::info("Checking passwords against breach databases...");
+
+                let ai = crate::ai::PasswordAi::new(crate::ai::AiConfig {
+                    check_breaches: true,
+                    ..Default::default()
+                });
+
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+                let mut breached_count = 0;
+                for entry in &entries {
+                    if let Some(ref password) = entry.password {
+                        if let Ok(is_breached) = rt.block_on(ai.check_breach(password.expose())) {
+                            if is_breached {
+                                breached_count += 1;
+                                println!(
+                                    "  {} {} - Password found in data breaches!",
+                                    "⚠".bright_red(),
+                                    entry.name.bright_white()
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if breached_count == 0 {
+                    Output::success("No breached passwords found!");
+                } else {
+                    println!();
+                    Output::warning(&format!(
+                        "{} password(s) found in breach databases. Change them immediately!",
+                        breached_count
+                    ));
+                }
             }
-            Output::warning("AI suggestions not yet implemented");
+
+            if !auto_tag && !analyze && !check_breaches {
+                Output::info("Use --auto-tag, --analyze, or --check-breaches to get suggestions");
+            }
+
             Ok(())
         }
 

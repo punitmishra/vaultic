@@ -19,7 +19,7 @@ This document provides context for Claude to continue developing Vaultic.
 ### Checkpoint: 2026-02-01
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 229 passing (100 bin + 98 lib + 26 integration + 5 doctests)
+**Tests**: 258 passing (100 bin + 118 lib + 35 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
 **CI/CD**: GitHub Actions configured and passing
@@ -60,7 +60,7 @@ cargo test                   # Run all tests (229 pass)
 | 7 | Password History (tracking, listing, restore) | ✅ Complete |
 | 8 | Batch Operations (tag, delete, move, favorite) | ✅ Complete |
 | 9 | Git Credential Helper (get, store, erase) | ✅ Complete |
-| 10 | Integration Tests (26 comprehensive tests) | ✅ Complete |
+| 10 | Integration Tests (35 comprehensive tests) | ✅ Complete |
 | - | Web Client (terminal-style demo) | ✅ Complete |
 | - | Demo Recordings (asciinema) | ✅ Complete |
 
@@ -70,7 +70,7 @@ cargo test                   # Run all tests (229 pass)
 |-------|---------|--------|
 | 1 | Key Hierarchy (VaultKey, KEK, wrapping) | ✅ Complete |
 | 2 | BIP39 Recovery Keys + QR Display | ✅ Complete |
-| 3 | AI Auto-Tagging | ⏳ Pending |
+| 3 | AI Auto-Tagging | ✅ Complete |
 | 4 | Shell Integration (SSH, Git) | ⏳ Pending |
 
 ### Module Status
@@ -168,17 +168,17 @@ vaultic tui
 | `unlock-method` | ✅ WORKING | List, add, remove unlock methods |
 | `recovery` | ✅ WORKING | BIP39 recovery key (generate, verify, show, unlock) |
 | `share` | ⚠️ STUB | Identity management needed |
-| `suggest` | ⚠️ STUB | AI suggestions needed |
+| `suggest` | ✅ WORKING | AI auto-tagging, analysis, breach checking |
 
 ---
 
 ## Test Results (Latest)
 
 ```
-cargo test: 229 tests passing
+cargo test: 258 tests passing
   - 100 bin tests (CLI parsing, commands)
-  - 98 lib tests (crypto, storage, models, migration, recovery)
-  - 26 integration tests (end-to-end workflows)
+  - 118 lib tests (crypto, storage, models, migration, recovery, ai)
+  - 35 integration tests (end-to-end workflows)
   - 5 doctests (code examples in documentation)
 
 cargo build --release: Success
@@ -198,6 +198,7 @@ Local workflow test:
 ✓ batch      - Batch operations (tag, delete, move)
 ✓ credential - Git credential helper (get/store/erase)
 ✓ recovery   - BIP39 key generation, QR display, unlock
+✓ suggest    - AI auto-tagging, analysis, breach checking
 ✓ tui        - Full terminal UI with vim keys
 ✓ import     - Bitwarden, LastPass, 1Password
 ✓ export     - JSON, CSV, encrypted backup
@@ -369,7 +370,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **229 tests passing** - Keep them green (100 bin + 98 lib + 26 integration + 5 doc)
+2. **258 tests passing** - Keep them green (100 bin + 118 lib + 35 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
@@ -385,6 +386,7 @@ rm -rf /tmp/test_vault
 15. **Password history** - Automatic tracking with restore capability
 16. **Batch operations** - Tag, delete, move, favorite multiple entries
 17. **BIP39 Recovery Keys** - Full implementation with QR display and unlock
+18. **AI Auto-Tagging** - Rule-based + Ollama-enhanced tag suggestions
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)
