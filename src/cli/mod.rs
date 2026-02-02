@@ -1383,13 +1383,144 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Get {
             query,
-            copy: _,
-            show: _,
-            qr: _,
-            field: _,
+            copy,
+            show,
+            qr,
+            field,
         } => {
-            Output::info(&format!("Searching for '{}'...", query));
-            Output::warning("Vault operations require unlock - not yet implemented");
+            // Require unlocked vault
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            // Refresh session
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Search for the entry
+            let filter = crate::models::SearchFilter {
+                query: Some(query.clone()),
+                entry_type: None,
+                tags: vec![],
+                folder: None,
+                favorites_only: false,
+                needs_rotation: false,
+                weak_passwords: false,
+                offset: 0,
+                limit: Some(10),
+            };
+
+            let entries = storage.search_entries(&filter)?;
+
+            if entries.is_empty() {
+                Output::error(&format!("No entry found matching '{}'", query));
+                return Ok(());
+            }
+
+            // If multiple matches, let user choose
+            let entry = if entries.len() == 1 {
+                entries.into_iter().next().unwrap()
+            } else {
+                let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Multiple matches found. Select one:")
+                    .items(&names)
+                    .default(0)
+                    .interact()?;
+                entries.into_iter().nth(selection).unwrap()
+            };
+
+            // Handle specific field request
+            if let Some(ref field_name) = field {
+                let value = match field_name.to_lowercase().as_str() {
+                    "password" | "pass" | "p" => entry
+                        .password
+                        .as_ref()
+                        .map(|p| p.expose().to_string())
+                        .unwrap_or_else(|| "(no password)".to_string()),
+                    "username" | "user" | "u" => entry
+                        .username
+                        .clone()
+                        .unwrap_or_else(|| "(no username)".to_string()),
+                    "url" => entry
+                        .url
+                        .clone()
+                        .unwrap_or_else(|| "(no url)".to_string()),
+                    "notes" => entry
+                        .notes
+                        .as_ref()
+                        .map(|n| n.expose().to_string())
+                        .unwrap_or_else(|| "(no notes)".to_string()),
+                    "totp" | "otp" => {
+                        if let Some(ref secret) = entry.totp_secret {
+                            match crate::totp::Totp::new(secret.expose()) {
+                                Ok(totp) => match totp.generate() {
+                                    Ok(code) => code,
+                                    Err(_) => "(failed to generate TOTP)".to_string(),
+                                },
+                                Err(_) => "(invalid TOTP secret)".to_string(),
+                            }
+                        } else {
+                            "(no TOTP configured)".to_string()
+                        }
+                    }
+                    _ => {
+                        // Try custom fields
+                        entry
+                            .custom_fields
+                            .iter()
+                            .find(|f| f.name.to_lowercase() == field_name.to_lowercase())
+                            .map(|f| f.value.expose().to_string())
+                            .unwrap_or_else(|| format!("(field '{}' not found)", field_name))
+                    }
+                };
+
+                if copy {
+                    copy_to_clipboard(&value, 30)?;
+                } else {
+                    println!("{}", value);
+                }
+                return Ok(());
+            }
+
+            // Show QR code if requested
+            if qr {
+                if let Some(ref password) = entry.password {
+                    use qrcode::render::unicode;
+                    use qrcode::QrCode;
+
+                    match QrCode::new(password.expose()) {
+                        Ok(code) => {
+                            let qr_string = code
+                                .render::<unicode::Dense1x2>()
+                                .dark_color(unicode::Dense1x2::Light)
+                                .light_color(unicode::Dense1x2::Dark)
+                                .build();
+                            println!("\n{}", qr_string);
+                        }
+                        Err(e) => Output::error(&format!("Failed to generate QR: {}", e)),
+                    }
+                } else {
+                    Output::warning("No password to display as QR");
+                }
+                return Ok(());
+            }
+
+            // Display the entry
+            display_entry(&entry, show);
+
+            // Copy password to clipboard if requested
+            if copy {
+                if let Some(ref password) = entry.password {
+                    copy_to_clipboard(password.expose(), 30)?;
+                } else {
+                    Output::warning("No password to copy");
+                }
+            }
+
             Ok(())
         }
 
@@ -1443,20 +1574,200 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             query,
             interactive: _,
         } => {
-            Output::info(&format!("Editing '{}'...", query));
-            Output::warning("Edit not yet implemented");
+            // Require unlocked vault
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            // Refresh session
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Search for the entry
+            let filter = crate::models::SearchFilter {
+                query: Some(query.clone()),
+                entry_type: None,
+                tags: vec![],
+                folder: None,
+                favorites_only: false,
+                needs_rotation: false,
+                weak_passwords: false,
+                offset: 0,
+                limit: Some(10),
+            };
+
+            let entries = storage.search_entries(&filter)?;
+
+            if entries.is_empty() {
+                Output::error(&format!("No entry found matching '{}'", query));
+                return Ok(());
+            }
+
+            // If multiple matches, let user choose
+            let mut entry = if entries.len() == 1 {
+                entries.into_iter().next().unwrap()
+            } else {
+                let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Multiple matches found. Select one to edit:")
+                    .items(&names)
+                    .default(0)
+                    .interact()?;
+                entries.into_iter().nth(selection).unwrap()
+            };
+
+            // Show current values and allow editing
+            Output::info(&format!("Editing '{}' (press Enter to keep current value)", entry.name));
+            println!();
+
+            // Edit name
+            let new_name: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Name")
+                .default(entry.name.clone())
+                .interact_text()?;
+            entry.name = new_name;
+
+            // Edit username
+            let current_username = entry.username.clone().unwrap_or_default();
+            let new_username: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Username")
+                .default(current_username)
+                .allow_empty(true)
+                .interact_text()?;
+            entry.username = if new_username.is_empty() {
+                None
+            } else {
+                Some(new_username)
+            };
+
+            // Edit password
+            if Prompts::confirm("Change password?", false)? {
+                let new_password = Password::with_theme(&ColorfulTheme::default())
+                    .with_prompt("New password")
+                    .allow_empty_password(true)
+                    .interact()?;
+                if !new_password.is_empty() {
+                    // Save old password to history
+                    if let Some(ref old_password) = entry.password {
+                        entry.password_history.push(crate::models::PasswordHistoryEntry {
+                            password: old_password.clone(),
+                            changed_at: chrono::Utc::now(),
+                        });
+                    }
+                    entry.password = Some(crate::models::SensitiveString::new(new_password));
+                    entry.password_changed_at = Some(chrono::Utc::now());
+                }
+            }
+
+            // Edit URL
+            let current_url = entry.url.clone().unwrap_or_default();
+            let new_url: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("URL")
+                .default(current_url)
+                .allow_empty(true)
+                .interact_text()?;
+            entry.url = if new_url.is_empty() { None } else { Some(new_url) };
+
+            // Edit tags
+            let current_tags = entry.tags.join(", ");
+            let new_tags: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Tags (comma-separated)")
+                .default(current_tags)
+                .allow_empty(true)
+                .interact_text()?;
+            entry.tags = new_tags
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            // Edit folder
+            let current_folder = entry.folder.clone().unwrap_or_default();
+            let new_folder: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Folder")
+                .default(current_folder)
+                .allow_empty(true)
+                .interact_text()?;
+            entry.folder = if new_folder.is_empty() {
+                None
+            } else {
+                Some(new_folder)
+            };
+
+            // Toggle favorite
+            entry.favorite = Prompts::confirm("Favorite?", entry.favorite)?;
+
+            // Update timestamp
+            entry.updated_at = chrono::Utc::now();
+
+            // Save the entry
+            storage.update_entry(&entry)?;
+            Output::success(&format!("Updated '{}'", entry.name));
             Ok(())
         }
 
         Commands::Delete { query, force } => {
+            // Require unlocked vault
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            // Refresh session
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Search for the entry
+            let filter = crate::models::SearchFilter {
+                query: Some(query.clone()),
+                entry_type: None,
+                tags: vec![],
+                folder: None,
+                favorites_only: false,
+                needs_rotation: false,
+                weak_passwords: false,
+                offset: 0,
+                limit: Some(10),
+            };
+
+            let entries = storage.search_entries(&filter)?;
+
+            if entries.is_empty() {
+                Output::error(&format!("No entry found matching '{}'", query));
+                return Ok(());
+            }
+
+            // If multiple matches, let user choose
+            let entry = if entries.len() == 1 {
+                entries.into_iter().next().unwrap()
+            } else {
+                let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Multiple matches found. Select one to delete:")
+                    .items(&names)
+                    .default(0)
+                    .interact()?;
+                entries.into_iter().nth(selection).unwrap()
+            };
+
+            // Confirm deletion
             if !force {
-                let confirm = Prompts::confirm(&format!("Delete '{}'?", query), false)?;
+                let confirm =
+                    Prompts::confirm(&format!("Delete '{}'?", entry.name), false)?;
                 if !confirm {
                     Output::info("Cancelled");
                     return Ok(());
                 }
             }
-            Output::warning("Delete not yet implemented");
+
+            // Delete the entry
+            storage.delete_entry(&entry.id)?;
+            Output::success(&format!("Deleted '{}'", entry.name));
             Ok(())
         }
 
@@ -1488,9 +1799,68 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Search { query: _ } => {
-            Output::info("Interactive search...");
-            Output::warning("Interactive search not yet implemented");
+        Commands::Search { query } => {
+            // Require unlocked vault
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+
+            // Refresh session
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Get all entries or search with query
+            let filter = crate::models::SearchFilter {
+                query: query.clone(),
+                entry_type: None,
+                tags: vec![],
+                folder: None,
+                favorites_only: false,
+                needs_rotation: false,
+                weak_passwords: false,
+                offset: 0,
+                limit: None,
+            };
+
+            let entries = storage.search_entries(&filter)?;
+
+            if entries.is_empty() {
+                if let Some(ref q) = query {
+                    Output::warning(&format!("No entries found matching '{}'", q));
+                } else {
+                    Output::warning("No entries in vault");
+                }
+                return Ok(());
+            }
+
+            // Interactive fuzzy search
+            let names: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let username = e.username.as_deref().unwrap_or("-");
+                    format!("{} ({})", e.name, username)
+                })
+                .collect();
+
+            let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                .with_prompt("Search entries")
+                .items(&names)
+                .default(0)
+                .interact()?;
+
+            let entry = &entries[selection];
+            display_entry(entry, false);
+
+            // Offer to copy password
+            if entry.password.is_some() {
+                if Prompts::confirm("Copy password to clipboard?", true)? {
+                    copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
+                }
+            }
+
             Ok(())
         }
 
