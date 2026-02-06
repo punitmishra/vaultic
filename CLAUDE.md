@@ -72,18 +72,19 @@ cargo test                   # Run all tests (229 pass)
 | 2 | BIP39 Recovery Keys + QR Display | ✅ Complete |
 | 3 | AI Auto-Tagging | ✅ Complete |
 | 4 | Shell Integration (exec, shell-init) | ✅ Complete |
+| 5 | Identity & Sharing (X25519 key exchange) | ✅ Complete |
 
 ### Module Status
 
 | Module | Status | Lines | Description |
 |--------|--------|-------|-------------|
-| `cli` | COMPLETE | ~1800 | All CLI commands + batch/history/credential/migrate |
+| `cli` | COMPLETE | ~4200 | All CLI commands + sharing/identity/batch/history/credential/migrate |
 | `tui` | COMPLETE | ~650 | Full ratatui TUI with vim keys |
 | `crypto` | COMPLETE | ~1200 | XChaCha20-Poly1305, Argon2id, key hierarchy |
 | `crypto/keys` | NEW | ~430 | VaultKey, KEK, UnlockMethod, VaultKeyring |
 | `crypto/kek` | NEW | ~230 | KEK derivation (password, recovery, hardware) |
 | `crypto/wrap` | NEW | ~330 | Key wrapping/unwrapping with XChaCha20-Poly1305 |
-| `storage` | COMPLETE | ~900 | Sled DB, encrypted CRUD, search, history |
+| `storage` | COMPLETE | ~800 | Sled DB, encrypted CRUD, search, history, identity storage |
 | `storage/keyring` | NEW | ~200 | Keyring persistence and version detection |
 | `migration` | NEW | ~390 | V1 to V2 vault migration with backup/rollback |
 | `session` | COMPLETE | ~250 | Compressed sessions, auto-expiry |
@@ -91,7 +92,7 @@ cargo test                   # Run all tests (229 pass)
 | `models` | COMPLETE | ~250 | VaultEntry, SensitiveString, PasswordHistory |
 | `totp` | COMPLETE | ~150 | RFC 6238 TOTP generation |
 | `gpg` | COMPLETE | ~350 | Sequoia OpenPGP integration |
-| `sharing` | COMPLETE | ~200 | X25519 key exchange, QR codes |
+| `sharing` | COMPLETE | ~400 | X25519 key exchange, identity management, QR codes |
 | `fido2` | COMPLETE | ~300 | Structure ready (needs hardware) |
 | `import` | COMPLETE | ~250 | Bitwarden, LastPass, 1Password |
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
@@ -151,8 +152,8 @@ vaultic tui
 | `list` | ✅ WORKING | Filters by tags, folder, favorites |
 | `generate` | ✅ WORKING | Password gen with entropy |
 | `get` | ✅ WORKING | Entry retrieval |
-| `edit` | ⚠️ PARTIAL | Basic implementation |
-| `delete` | ⚠️ PARTIAL | Basic implementation |
+| `edit` | ✅ WORKING | Full entry editing with all fields |
+| `delete` | ✅ WORKING | Entry deletion with confirmation |
 | `search` | ✅ WORKING | Fuzzy search |
 | `import` | ✅ WORKING | Bitwarden, LastPass, 1Password |
 | `export` | ✅ WORKING | JSON, CSV, encrypted |
@@ -167,7 +168,8 @@ vaultic tui
 | `migrate` | ✅ WORKING | Migrate v1 vault to v2 with multi-method unlock |
 | `unlock-method` | ✅ WORKING | List, add, remove unlock methods |
 | `recovery` | ✅ WORKING | BIP39 recovery key (generate, verify, show, unlock) |
-| `share` | ⚠️ STUB | Identity management needed |
+| `share` | ✅ WORKING | Share entries with X25519 key exchange |
+| `identity` | ✅ WORKING | Identity management (show, add, list, remove, export) |
 | `suggest` | ✅ WORKING | AI auto-tagging, analysis, breach checking |
 | `exec` | ✅ WORKING | Run commands with vault secrets as env vars |
 | `shell-init` | ✅ WORKING | Generate shell aliases (bash/zsh/fish/powershell) |
@@ -194,6 +196,9 @@ Local workflow test:
 ✓ generate   - Strong password with entropy analysis
 ✓ list       - Formatted table with filters
 ✓ get        - Entry retrieval with clipboard
+✓ edit       - Entry editing with all fields
+✓ delete     - Entry deletion with confirmation
+✓ search     - Fuzzy search with interactive selection
 ✓ status     - Shows vault and session info
 ✓ health     - Security audit with health score
 ✓ history    - Password history tracking and restore
@@ -203,6 +208,8 @@ Local workflow test:
 ✓ suggest    - AI auto-tagging, analysis, breach checking
 ✓ exec       - Run commands with vault secrets as env vars
 ✓ shell-init - Generate shell integration scripts
+✓ identity   - Identity management (show/add/list/remove/export)
+✓ share      - Secure entry sharing with X25519 key exchange
 ✓ tui        - Full terminal UI with vim keys
 ✓ import     - Bitwarden, LastPass, 1Password
 ✓ export     - JSON, CSV, encrypted backup
@@ -269,10 +276,8 @@ Fully implemented with:
 ## Remaining Work (Nice to Have)
 
 ### Optional Features
-1. **`share` command** - Full identity management and key exchange
-2. **`suggest` command** - AI-powered username/password suggestions
-3. **FIDO2 testing** - Requires YubiKey hardware for verification
-4. **Browser extension** - Chrome/Firefox integration
+1. **FIDO2 testing** - Requires YubiKey hardware for verification
+2. **Browser extension** - Chrome/Firefox integration
 
 ### Polish (Low Priority)
 1. Performance optimization for vaults with 10,000+ entries
@@ -392,6 +397,8 @@ rm -rf /tmp/test_vault
 17. **BIP39 Recovery Keys** - Full implementation with QR display and unlock
 18. **AI Auto-Tagging** - Rule-based + Ollama-enhanced tag suggestions
 19. **Shell Integration** - exec command + shell-init for bash/zsh/fish/powershell
+20. **Identity Management** - Full X25519 keypair generation, export/import
+21. **Secure Sharing** - Entry sharing with ephemeral key exchange
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)

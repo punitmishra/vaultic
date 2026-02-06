@@ -58,7 +58,7 @@ use sled::{Db, Tree};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::crypto::{Cipher, CryptoError, MasterKey};
+use crate::crypto::{Cipher, CryptoError, IdentityKeyPair, MasterKey};
 use crate::models::{
     AuditLogEntry, KdfParams, SearchFilter, SharedSecret, UserIdentity, VaultEntry, VaultMetadata,
 };
@@ -98,6 +98,7 @@ mod trees {
     pub const SHARED_SECRETS: &str = "shared_secrets";
     pub const AUDIT_LOG: &str = "audit_log";
     pub const CONFIG: &str = "config";
+    pub const OWN_KEYPAIR: &str = "own_keypair";
 }
 
 /// Encrypted vault storage
@@ -511,6 +512,53 @@ impl VaultStorage {
         }
 
         Ok(secrets)
+    }
+
+    /// Delete an identity by ID
+    pub fn delete_identity(&self, id: &Uuid) -> StorageResult<bool> {
+        let tree = self.get_tree(trees::IDENTITIES)?;
+        let removed = tree.remove(id.as_bytes())?.is_some();
+        Ok(removed)
+    }
+
+    // ============ Own Identity Keypair ============
+
+    /// Store the vault's own identity keypair (encrypted)
+    pub fn store_own_keypair(&self, keypair: &IdentityKeyPair) -> StorageResult<()> {
+        let cipher = self.get_cipher()?;
+        let encrypted = keypair.export(&cipher)?;
+        let tree = self.get_tree(trees::OWN_KEYPAIR)?;
+        tree.insert(b"keypair", encrypted)?;
+        Ok(())
+    }
+
+    /// Retrieve the vault's own identity keypair
+    pub fn get_own_keypair(&self) -> StorageResult<Option<IdentityKeyPair>> {
+        let tree = self.get_tree(trees::OWN_KEYPAIR)?;
+        match tree.get(b"keypair")? {
+            Some(encrypted) => {
+                let cipher = self.get_cipher()?;
+                let keypair = IdentityKeyPair::import(&encrypted, &cipher)?;
+                Ok(Some(keypair))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Check if the vault has an identity keypair
+    pub fn has_own_keypair(&self) -> StorageResult<bool> {
+        let tree = self.get_tree(trees::OWN_KEYPAIR)?;
+        Ok(tree.get(b"keypair")?.is_some())
+    }
+
+    /// Store the vault owner's name (for identity)
+    pub fn store_owner_name(&self, name: &str) -> StorageResult<()> {
+        self.set_config("owner_name", name)
+    }
+
+    /// Get the vault owner's name
+    pub fn get_owner_name(&self) -> StorageResult<Option<String>> {
+        self.get_config("owner_name")
     }
 
     // ============ Audit Log ============

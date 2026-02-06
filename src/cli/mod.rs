@@ -7,7 +7,7 @@
 //! - Clipboard integration
 //! - QR code generation for sharing
 
-use std::io;
+use std::io::{self, IsTerminal};
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -1867,34 +1867,197 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Share {
             query,
             to,
-            one_time: _,
-            expires: _,
+            one_time,
+            expires,
         } => {
-            Output::info(&format!("Sharing '{}' to '{}'...", query, to));
-            Output::warning("Sharing not yet implemented");
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            // Get our own keypair
+            let own_keypair = storage
+                .get_own_keypair()?
+                .ok_or("No identity set up. Run 'vaultic identity show' first to create one.")?;
+            let owner_name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+            let sharing_manager = crate::sharing::SharingManager::new(own_keypair, owner_name);
+
+            // Find the entry to share
+            let entries = storage.list_entries()?;
+            let entry = entries
+                .iter()
+                .find(|e| e.name.to_lowercase().contains(&query.to_lowercase()))
+                .ok_or_else(|| format!("Entry '{}' not found", query))?;
+
+            // Find the recipient
+            let recipient = storage
+                .get_identity_by_fingerprint(&to)?
+                .or_else(|| {
+                    storage
+                        .list_identities()
+                        .ok()
+                        .and_then(|ids| ids.into_iter().find(|i| i.name.to_lowercase() == to.to_lowercase()))
+                })
+                .ok_or_else(|| format!("Recipient '{}' not found. Add their identity first with 'vaultic identity add'.", to))?;
+
+            // Create the share
+            let share = sharing_manager.create_share(
+                entry,
+                &recipient,
+                one_time,
+                expires,
+                if one_time { Some(1) } else { None },
+            )?;
+
+            // Store the share
+            storage.add_shared_secret(&share)?;
+
+            Output::success(&format!("Shared '{}' with {}", entry.name, recipient.name));
+            println!();
+            Output::info("Share details:");
+            println!("  Share ID:    {}", share.id);
+            println!("  Recipient:   {} ({})", recipient.name, &recipient.fingerprint[..16]);
+            if let Some(exp) = share.expires_at {
+                println!("  Expires:     {}", exp.format("%Y-%m-%d %H:%M UTC"));
+            } else {
+                println!("  Expires:     Never");
+            }
+            println!("  One-time:    {}", if one_time { "Yes" } else { "No" });
+
+            // Generate share link
+            let link = sharing_manager.create_share_link(&share);
+            println!();
+            Output::info(&format!("Share link: {}", link));
+
             Ok(())
         }
 
         Commands::Identity { command } => {
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
             match command {
                 IdentityCommands::Show => {
                     Output::header("Your Identity");
-                    Output::warning("Identity management not yet implemented");
+
+                    // Check if we have a keypair, create one if not
+                    let (keypair, owner_name) = if let Some(kp) = storage.get_own_keypair()? {
+                        let name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+                        (kp, name)
+                    } else {
+                        // Create new identity
+                        Output::info("Creating your identity...");
+                        let keypair = crate::crypto::IdentityKeyPair::generate();
+
+                        // Prompt for name
+                        let name = if std::io::stdin().is_terminal() {
+                            print!("Enter your name: ");
+                            std::io::Write::flush(&mut std::io::stdout())?;
+                            let mut input = String::new();
+                            std::io::stdin().read_line(&mut input)?;
+                            input.trim().to_string()
+                        } else {
+                            "Vaultic User".to_string()
+                        };
+
+                        storage.store_own_keypair(&keypair)?;
+                        storage.store_owner_name(&name)?;
+                        Output::success("Identity created!");
+                        println!();
+                        (keypair, name)
+                    };
+
+                    let fingerprint = keypair.fingerprint();
+
+                    println!("  Name:        {}", owner_name);
+                    println!("  Fingerprint: {}", fingerprint);
+                    println!();
+                    Output::info("Share your identity with 'vaultic identity export'");
                 }
-                IdentityCommands::Add {
-                    name,
-                    public_key: _,
-                } => {
-                    Output::info(&format!("Adding identity '{}'...", name));
+
+                IdentityCommands::Add { name, public_key } => {
+                    // Import identity from exported string
+                    let identity = crate::sharing::SharingManager::import_identity(&public_key)
+                        .map_err(|_| "Invalid identity format. Make sure you're using the full exported string.")?;
+
+                    // Override the imported name with the provided name
+                    let mut identity = identity;
+                    if !name.is_empty() {
+                        identity.name = name.clone();
+                    }
+
+                    // Check for duplicates
+                    if storage.get_identity_by_fingerprint(&identity.fingerprint)?.is_some() {
+                        Output::warning(&format!("Identity '{}' already exists", identity.fingerprint));
+                        return Ok(());
+                    }
+
+                    storage.add_identity(&identity)?;
+                    Output::success(&format!("Added identity '{}'", identity.name));
+                    println!("  Fingerprint: {}", identity.fingerprint);
                 }
+
                 IdentityCommands::List => {
                     Output::header("Trusted Identities");
+
+                    let identities = storage.list_identities()?;
+                    if identities.is_empty() {
+                        Output::info("No trusted identities. Add one with 'vaultic identity add <name> <public_key>'");
+                    } else {
+                        for identity in identities {
+                            println!("  {} ({})", identity.name, &identity.fingerprint[..16]);
+                            if let Some(email) = &identity.email {
+                                println!("    Email: {}", email);
+                            }
+                            println!("    Added: {}", identity.created_at.format("%Y-%m-%d"));
+                            println!("    Trusted: {}", if identity.trusted { "Yes" } else { "No" });
+                            println!();
+                        }
+                    }
                 }
+
                 IdentityCommands::Remove { query } => {
-                    Output::info(&format!("Removing identity '{}'...", query));
+                    // Find identity by fingerprint or name
+                    let identity = storage
+                        .get_identity_by_fingerprint(&query)?
+                        .or_else(|| {
+                            storage
+                                .list_identities()
+                                .ok()
+                                .and_then(|ids| ids.into_iter().find(|i| i.name.to_lowercase() == query.to_lowercase()))
+                        })
+                        .ok_or_else(|| format!("Identity '{}' not found", query))?;
+
+                    storage.delete_identity(&identity.id)?;
+                    Output::success(&format!("Removed identity '{}'", identity.name));
                 }
+
                 IdentityCommands::Export => {
-                    Output::header("Exporting Identity");
+                    Output::header("Export Your Identity");
+
+                    let keypair = storage
+                        .get_own_keypair()?
+                        .ok_or("No identity set up. Run 'vaultic identity show' first.")?;
+                    let owner_name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+                    let sharing_manager = crate::sharing::SharingManager::new(keypair, owner_name);
+
+                    let exported = sharing_manager.export_identity();
+                    println!();
+                    Output::info("Share this with others so they can send you entries:");
+                    println!();
+                    println!("{}", exported);
+                    println!();
+                    Output::info("They can add you with: vaultic identity add \"Your Name\" \"<the above string>\"");
                 }
             }
             Ok(())
