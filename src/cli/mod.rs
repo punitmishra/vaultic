@@ -1860,11 +1860,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             display_entry(entry, false);
 
             // Offer to copy password
-            if entry.password.is_some() {
-                if Prompts::confirm("Copy password to clipboard?", true)? {
+            if entry.password.is_some()
+                && Prompts::confirm("Copy password to clipboard?", true)? {
                     copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
                 }
-            }
 
             Ok(())
         }

@@ -526,7 +526,7 @@ impl VaultStorage {
     /// Store the vault's own identity keypair (encrypted)
     pub fn store_own_keypair(&self, keypair: &IdentityKeyPair) -> StorageResult<()> {
         let cipher = self.get_cipher()?;
-        let encrypted = keypair.export(&cipher)?;
+        let encrypted = keypair.export(cipher)?;
         let tree = self.get_tree(trees::OWN_KEYPAIR)?;
         tree.insert(b"keypair", encrypted)?;
         Ok(())
@@ -538,7 +538,7 @@ impl VaultStorage {
         match tree.get(b"keypair")? {
             Some(encrypted) => {
                 let cipher = self.get_cipher()?;
-                let keypair = IdentityKeyPair::import(&encrypted, &cipher)?;
+                let keypair = IdentityKeyPair::import(&encrypted, cipher)?;
                 Ok(Some(keypair))
             }
             None => Ok(None),
