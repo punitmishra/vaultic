@@ -18,6 +18,8 @@ A lightweight, security-focused password manager written in Rust with hardware a
 ### Security
 - **XChaCha20-Poly1305** - Authenticated encryption with 256-bit keys
 - **Argon2id KDF** - Memory-hard key derivation (64MB default)
+- **Multi-Method Unlock** - Password, BIP39 recovery keys, or hardware keys
+- **X25519 Key Exchange** - Secure sharing with perfect forward secrecy
 - **Compressed Sessions** - DEFLATE-compressed, encrypted session files
 - **Zero Memory Leaks** - Sensitive data auto-zeroed with `zeroize`
 - **Local-Only** - No cloud, no servers, your data stays with you
@@ -27,18 +29,22 @@ A lightweight, security-focused password manager written in Rust with hardware a
 | Feature | Status |
 |---------|--------|
 | Vault init/unlock/lock | ✅ Working |
+| Multi-method unlock (password, recovery key) | ✅ Working |
+| BIP39 recovery keys with QR display | ✅ Working |
 | Session management (15-min auto-expiry) | ✅ Working |
-| Add/List/Get entries | ✅ Working |
+| Add/List/Get/Edit/Delete/Search entries | ✅ Working |
 | Password generation with entropy analysis | ✅ Working |
 | Tag/folder filtering | ✅ Working |
 | Import (Bitwarden, LastPass, 1Password) | ✅ Working |
 | Export (JSON, CSV, Encrypted) | ✅ Working |
 | Interactive TUI mode (ratatui) | ✅ Working |
 | Shell completions (bash/zsh/fish/powershell) | ✅ Working |
+| Shell integration (exec, shell-init) | ✅ Working |
 | AI analysis (Ollama integration) | ✅ Working |
+| AI auto-tagging | ✅ Working |
 | HIBP breach checking | ✅ Working |
 | TOTP/2FA support | ✅ Working |
-| GPG key integration | ✅ Working |
+| Identity management & secure sharing | ✅ Working |
 | X25519 key exchange | ✅ Working |
 | QR code generation | ✅ Working |
 | Simple web client | ✅ Working |
@@ -47,6 +53,56 @@ A lightweight, security-focused password manager written in Rust with hardware a
 | Git credential helper | ✅ Working |
 | Health audit with scoring | ✅ Working |
 | FIDO2/YubiKey | 🔧 Structure ready (needs hardware) |
+
+---
+
+## Installation
+
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap punitmishra/vaultic
+brew install vaultic
+```
+
+### From Source
+
+```bash
+# Clone repository
+git clone https://github.com/punitmishra/vaultic.git
+cd vaultic
+
+# Build release binary
+cargo build --release
+
+# Install to PATH (optional)
+cp target/release/vaultic /usr/local/bin/
+
+# Verify installation
+vaultic --version
+```
+
+### Direct Download
+
+Download pre-built binaries from the [releases page](https://github.com/punitmishra/vaultic/releases):
+- macOS (Intel): `vaultic-macos-x86_64.tar.gz`
+- macOS (Apple Silicon): `vaultic-macos-aarch64.tar.gz`
+- Linux (x86_64): `vaultic-linux-x86_64.tar.gz`
+- Linux (ARM64): `vaultic-linux-aarch64.tar.gz`
+- Linux (musl): `vaultic-linux-x86_64-musl.tar.gz`
+
+### Shell Completions
+
+```bash
+# Bash
+vaultic completions bash > ~/.local/share/bash-completion/completions/vaultic
+
+# Zsh
+vaultic completions zsh > ~/.zfunc/_vaultic
+
+# Fish
+vaultic completions fish > ~/.config/fish/completions/vaultic.fish
+```
 
 ---
 
@@ -66,60 +122,17 @@ vaultic add "AWS" -u "admin" --generate --url "https://aws.amazon.com"
 # List entries
 vaultic list
 
+# Search entries
+vaultic search "git"
+
 # Generate password
 vaultic generate --length 24
 
-# Check status
-vaultic status
+# Check vault health
+vaultic health
 
 # Lock when done
 vaultic lock
-```
-
----
-
-## Installation
-
-### From Source
-
-```bash
-# Clone repository
-git clone https://github.com/punitmishra/vaultic.git
-cd vaultic
-
-# Build release binary
-cargo build --release
-
-# Install to PATH (optional)
-cp target/release/vaultic /usr/local/bin/
-
-# Verify installation
-vaultic --version
-```
-
-### Shell Completions
-
-```bash
-# Bash
-vaultic completions bash > ~/.local/share/bash-completion/completions/vaultic
-
-# Zsh
-vaultic completions zsh > ~/.zfunc/_vaultic
-
-# Fish
-vaultic completions fish > ~/.config/fish/completions/vaultic.fish
-```
-
-### Prerequisites
-
-**macOS:**
-```bash
-brew install nettle pkg-config
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt install pkg-config libssl-dev libudev-dev libnettle-dev
 ```
 
 ---
@@ -148,6 +161,22 @@ vaultic status
 vaultic lock
 ```
 
+### Multi-Method Unlock (v2.0)
+
+```bash
+# Migrate existing vault to v2 format
+vaultic migrate
+
+# Generate BIP39 recovery key
+vaultic recovery generate --qr
+
+# Unlock with recovery phrase
+vaultic recovery unlock
+
+# List configured unlock methods
+vaultic unlock-method list
+```
+
 ### Password Entries
 
 ```bash
@@ -165,14 +194,78 @@ vaultic add "GitHub" \
 # Add with generated password
 vaultic add "New Service" -u "user" --generate --length 24
 
+# Get entry details
+vaultic get "GitHub"
+
+# Edit an entry
+vaultic edit "GitHub"
+
+# Delete an entry
+vaultic delete "GitHub"
+
+# Search entries
+vaultic search "git"
+
 # List all entries
 vaultic list
 
 # Filter by tags
 vaultic list --tags "work"
+```
 
-# Filter by folder
-vaultic list --folder "Development"
+### Identity & Sharing
+
+```bash
+# View/create your identity
+vaultic identity show
+
+# Export your identity (share with others)
+vaultic identity export
+
+# Add someone's identity
+vaultic identity add "Alice" "<exported_identity_string>"
+
+# List trusted identities
+vaultic identity list
+
+# Share an entry securely
+vaultic share "GitHub" --to "Alice"
+
+# Share with expiration (24 hours)
+vaultic share "AWS" --to "Bob" --expires 24 --one-time
+```
+
+### Shell Integration
+
+```bash
+# Run command with vault secrets as environment variables
+vaultic exec "AWS" -- aws s3 ls
+
+# Generate shell aliases
+eval "$(vaultic shell-init bash)"
+eval "$(vaultic shell-init zsh)"
+vaultic shell-init fish | source
+
+# Use convenient aliases (after shell-init)
+vg GitHub          # Get entry
+vcp GitHub         # Copy password
+vrun GitHub aws    # Run with secrets
+```
+
+### AI Features
+
+```bash
+# Get AI-powered tag suggestions
+vaultic suggest --auto-tag
+
+# Apply suggested tags
+vaultic suggest --auto-tag --apply
+
+# Analyze password strength
+vaultic suggest --analyze
+
+# Check for breaches
+vaultic suggest --check-breaches
 ```
 
 ### Password Generation
@@ -282,13 +375,6 @@ vaultic tui
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**TUI Features:**
-- Entry list with fuzzy search
-- Detail view with password show/hide
-- Copy password to clipboard
-- Delete with confirmation
-- Vim-style navigation
-
 **Keybindings:**
 
 | Key | Action |
@@ -300,28 +386,12 @@ vaultic tui
 | `/` | Search entries |
 | `Enter` | View entry details |
 | `y` | Copy password to clipboard |
-| `p` | Toggle password visibility (in detail view) |
+| `p` | Toggle password visibility |
 | `d` | Delete entry (with confirmation) |
 | `r` | Refresh entries |
 | `?` | Show help screen |
 | `Esc` | Cancel / go back |
 | `q` | Quit |
-
----
-
-## Demo
-
-**Play demo recordings locally:**
-```bash
-# Install asciinema
-brew install asciinema  # macOS
-apt install asciinema   # Linux
-
-# Play recordings
-asciinema play demos/quickstart.cast   # Basic workflow
-asciinema play demos/features.cast     # Full features showcase
-asciinema play demos/generate.cast     # Password generation
-```
 
 ---
 
@@ -344,10 +414,10 @@ asciinema play demos/generate.cast     # Password generation
         │          │          │          │
 ┌───────┴──────────┴──────────┴──────────┴───────────────────┐
 │                   Data Layer                                │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐                       │
-│  │  Sled   │ │  Files  │ │  KDF    │                       │
-│  │   DB    │ │(session)│ │ params  │                       │
-│  └─────────┘ └─────────┘ └─────────┘                       │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
+│  │  Sled   │ │  Files  │ │  KDF    │ │ Keyring │           │
+│  │   DB    │ │(session)│ │ params  │ │  (v2)   │           │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -359,6 +429,7 @@ asciinema play demos/generate.cast     # Password generation
 ├── conf                # Sled configuration
 ├── blobs/              # Sled blob storage
 ├── kdf_params.json     # Salt + KDF parameters
+├── keyring.json        # v2: Encrypted unlock method keys
 └── .session            # Encrypted session (temporary)
 ```
 
@@ -372,13 +443,14 @@ asciinema play demos/generate.cast     # Password generation
 2. **Key Expansion**: Master key → HKDF → encryption key + auth key
 3. **Data Encryption**: XChaCha20-Poly1305 with random nonces
 4. **Session Storage**: DEFLATE compression → XChaCha20-Poly1305 → file
+5. **Sharing**: X25519 ephemeral key exchange → XChaCha20-Poly1305
 
-### Session Security
+### Multi-Method Unlock (v2)
 
-- Sessions encrypted with machine-specific key
-- Machine key = SHA256(username + hostname + machine-id)
-- Auto-expires after configurable timeout
-- Securely overwritten on lock
+- **VaultKey**: Random 256-bit key that encrypts all vault data
+- **KEK (Key Encryption Key)**: Derived from unlock method (password, recovery key, hardware key)
+- **Wrapped Keys**: VaultKey encrypted with each KEK, stored in keyring.json
+- **Recovery Keys**: BIP39 24-word mnemonic for emergency recovery
 
 ---
 
@@ -404,67 +476,32 @@ cargo fmt
 cargo clippy
 ```
 
-### Project Structure
-
-```
-src/
-├── main.rs         # Entry point
-├── lib.rs          # Module exports
-├── cli/mod.rs      # Command handlers
-├── crypto/mod.rs   # Encryption, KDF
-├── storage/mod.rs  # Database operations
-├── session/mod.rs  # Session management
-├── models/mod.rs   # Data structures
-├── ai/mod.rs       # Ollama integration
-├── totp/mod.rs     # 2FA support
-├── gpg/mod.rs      # OpenPGP integration
-├── sharing/mod.rs  # E2E sharing
-├── fido2/mod.rs    # Hardware auth
-├── tui/mod.rs      # Terminal UI
-├── import.rs       # Import formats
-└── export.rs       # Export formats
-```
-
 ---
 
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VAULTIC_HOME` | `~/.vaultic` | Vault directory |
-| `VAULTIC_PASSWORD` | - | Password for scripts/CI |
-| `VAULTIC_DEBUG` | - | Enable debug logging |
-
----
-
-## Test Results (2026-01-04)
+## Test Results (v2.0.0)
 
 ```
-cargo test: 120 tests passing
-  - 49 bin tests (CLI commands and parsing)
-  - 47 lib tests (crypto, storage, models)
-  - 19 integration tests (end-to-end workflows)
+cargo test: 264 tests passing
+  - 110 bin tests (CLI commands and parsing)
+  - 108 lib tests (crypto, storage, models, migration, recovery, ai)
+  - 41 integration tests (end-to-end workflows)
   - 5 doctests (code examples)
 
 cargo build --release: Success
 cargo clippy: No warnings
+cargo fmt --check: Formatted
 
-Local workflow test:
-✓ init        - Vault created with KDF params
-✓ unlock      - Session created (15 min)
-✓ add         - Entries with tags, custom fields, notes
-✓ generate    - 127.8 bits entropy (Very Strong)
-✓ list        - Formatted table with filters
-✓ status      - Shows vault and session info
-✓ health      - Security audit with health score
-✓ history     - Password history and restore
-✓ batch       - Batch operations on entries
-✓ credential  - Git credential helper
-✓ tui         - Full terminal UI working
-✓ import      - Bitwarden, LastPass, 1Password
-✓ export      - JSON, CSV, encrypted
-✓ lock        - Session destroyed
-✓ completions - bash/zsh/fish/powershell
+All features tested and working:
+✓ init, unlock, lock, status
+✓ add, list, get, edit, delete, search
+✓ generate, health, history
+✓ identity (show, export, add, list, remove)
+✓ share (with expiration, one-time)
+✓ recovery (generate, verify, unlock)
+✓ exec, shell-init
+✓ suggest (auto-tag, analyze, check-breaches)
+✓ batch, credential
+✓ tui, import, export, completions
 ```
 
 ---
@@ -475,7 +512,8 @@ Contributions welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Run tests (`cargo test`)
-4. Submit a pull request
+4. Format code (`cargo fmt`)
+5. Submit a pull request
 
 ---
 

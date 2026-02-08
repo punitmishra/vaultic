@@ -533,7 +533,10 @@ Common tags: {:?}"#,
                 for tag in ai_tags {
                     let tag_lower = tag.to_lowercase();
                     if !tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_lower))
-                        && !entry.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag_lower))
+                        && !entry
+                            .tags
+                            .iter()
+                            .any(|t| t.eq_ignore_ascii_case(&tag_lower))
                     {
                         tags.push(tag_lower);
                     }
@@ -578,7 +581,9 @@ Respond with ONLY a JSON array of lowercase tag strings, nothing else. Example: 
                     .map_err(|e| AiError::RequestFailed(e.to_string()))?;
 
                 if !response.status().is_success() {
-                    return Err(AiError::BackendUnavailable("Ollama unavailable".to_string()));
+                    return Err(AiError::BackendUnavailable(
+                        "Ollama unavailable".to_string(),
+                    ));
                 }
 
                 let ollama_response: OllamaResponse = response
@@ -686,9 +691,7 @@ Respond with ONLY a JSON array of lowercase tag strings, nothing else. Example: 
             tags.push("finance".to_string());
             tags.push("banking".to_string());
         }
-        if url.contains("coinbase.com")
-            || url.contains("binance.com")
-            || url.contains("kraken.com")
+        if url.contains("coinbase.com") || url.contains("binance.com") || url.contains("kraken.com")
         {
             tags.push("finance".to_string());
             tags.push("crypto".to_string());

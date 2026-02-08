@@ -461,8 +461,8 @@ fn test_recovery_key_display_formatted() {
 fn test_auto_tag_github_url() {
     use vaultic::ai::PasswordAi;
 
-    let entry = VaultEntry::new("My GitHub", EntryType::Password)
-        .with_url("https://github.com/user/repo");
+    let entry =
+        VaultEntry::new("My GitHub", EntryType::Password).with_url("https://github.com/user/repo");
 
     let tags = PasswordAi::suggest_tags(&entry);
     assert!(tags.contains(&"development".to_string()));
@@ -520,8 +520,8 @@ fn test_auto_tag_cloud_providers() {
 
     let aws_entry = VaultEntry::new("AWS Console", EntryType::Password)
         .with_url("https://console.aws.amazon.com");
-    let gcp_entry = VaultEntry::new("GCP", EntryType::Password)
-        .with_url("https://console.cloud.google.com");
+    let gcp_entry =
+        VaultEntry::new("GCP", EntryType::Password).with_url("https://console.cloud.google.com");
     let azure_entry =
         VaultEntry::new("Azure Portal", EntryType::Password).with_url("https://portal.azure.com");
 

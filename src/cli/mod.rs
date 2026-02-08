@@ -1445,10 +1445,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         .username
                         .clone()
                         .unwrap_or_else(|| "(no username)".to_string()),
-                    "url" => entry
-                        .url
-                        .clone()
-                        .unwrap_or_else(|| "(no url)".to_string()),
+                    "url" => entry.url.clone().unwrap_or_else(|| "(no url)".to_string()),
                     "notes" => entry
                         .notes
                         .as_ref()
@@ -1620,7 +1617,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Show current values and allow editing
-            Output::info(&format!("Editing '{}' (press Enter to keep current value)", entry.name));
+            Output::info(&format!(
+                "Editing '{}' (press Enter to keep current value)",
+                entry.name
+            ));
             println!();
 
             // Edit name
@@ -1652,10 +1652,12 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 if !new_password.is_empty() {
                     // Save old password to history
                     if let Some(ref old_password) = entry.password {
-                        entry.password_history.push(crate::models::PasswordHistoryEntry {
-                            password: old_password.clone(),
-                            changed_at: chrono::Utc::now(),
-                        });
+                        entry
+                            .password_history
+                            .push(crate::models::PasswordHistoryEntry {
+                                password: old_password.clone(),
+                                changed_at: chrono::Utc::now(),
+                            });
                     }
                     entry.password = Some(crate::models::SensitiveString::new(new_password));
                     entry.password_changed_at = Some(chrono::Utc::now());
@@ -1669,7 +1671,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 .default(current_url)
                 .allow_empty(true)
                 .interact_text()?;
-            entry.url = if new_url.is_empty() { None } else { Some(new_url) };
+            entry.url = if new_url.is_empty() {
+                None
+            } else {
+                Some(new_url)
+            };
 
             // Edit tags
             let current_tags = entry.tags.join(", ");
@@ -1757,8 +1763,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
             // Confirm deletion
             if !force {
-                let confirm =
-                    Prompts::confirm(&format!("Delete '{}'?", entry.name), false)?;
+                let confirm = Prompts::confirm(&format!("Delete '{}'?", entry.name), false)?;
                 if !confirm {
                     Output::info("Cancelled");
                     return Ok(());
@@ -1883,7 +1888,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let own_keypair = storage
                 .get_own_keypair()?
                 .ok_or("No identity set up. Run 'vaultic identity show' first to create one.")?;
-            let owner_name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+            let owner_name = storage
+                .get_owner_name()?
+                .unwrap_or_else(|| "Unknown".to_string());
             let sharing_manager = crate::sharing::SharingManager::new(own_keypair, owner_name);
 
             // Find the entry to share
@@ -1920,7 +1927,11 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             println!();
             Output::info("Share details:");
             println!("  Share ID:    {}", share.id);
-            println!("  Recipient:   {} ({})", recipient.name, &recipient.fingerprint[..16]);
+            println!(
+                "  Recipient:   {} ({})",
+                recipient.name,
+                &recipient.fingerprint[..16]
+            );
             if let Some(exp) = share.expires_at {
                 println!("  Expires:     {}", exp.format("%Y-%m-%d %H:%M UTC"));
             } else {
@@ -1952,7 +1963,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     // Check if we have a keypair, create one if not
                     let (keypair, owner_name) = if let Some(kp) = storage.get_own_keypair()? {
-                        let name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+                        let name = storage
+                            .get_owner_name()?
+                            .unwrap_or_else(|| "Unknown".to_string());
                         (kp, name)
                     } else {
                         // Create new identity
@@ -1997,8 +2010,14 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     // Check for duplicates
-                    if storage.get_identity_by_fingerprint(&identity.fingerprint)?.is_some() {
-                        Output::warning(&format!("Identity '{}' already exists", identity.fingerprint));
+                    if storage
+                        .get_identity_by_fingerprint(&identity.fingerprint)?
+                        .is_some()
+                    {
+                        Output::warning(&format!(
+                            "Identity '{}' already exists",
+                            identity.fingerprint
+                        ));
                         return Ok(());
                     }
 
@@ -2020,7 +2039,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 println!("    Email: {}", email);
                             }
                             println!("    Added: {}", identity.created_at.format("%Y-%m-%d"));
-                            println!("    Trusted: {}", if identity.trusted { "Yes" } else { "No" });
+                            println!(
+                                "    Trusted: {}",
+                                if identity.trusted { "Yes" } else { "No" }
+                            );
                             println!();
                         }
                     }
@@ -2031,10 +2053,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let identity = storage
                         .get_identity_by_fingerprint(&query)?
                         .or_else(|| {
-                            storage
-                                .list_identities()
-                                .ok()
-                                .and_then(|ids| ids.into_iter().find(|i| i.name.to_lowercase() == query.to_lowercase()))
+                            storage.list_identities().ok().and_then(|ids| {
+                                ids.into_iter()
+                                    .find(|i| i.name.to_lowercase() == query.to_lowercase())
+                            })
                         })
                         .ok_or_else(|| format!("Identity '{}' not found", query))?;
 
@@ -2048,7 +2070,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     let keypair = storage
                         .get_own_keypair()?
                         .ok_or("No identity set up. Run 'vaultic identity show' first.")?;
-                    let owner_name = storage.get_owner_name()?.unwrap_or_else(|| "Unknown".to_string());
+                    let owner_name = storage
+                        .get_owner_name()?
+                        .unwrap_or_else(|| "Unknown".to_string());
                     let sharing_manager = crate::sharing::SharingManager::new(keypair, owner_name);
 
                     let exported = sharing_manager.export_identity();
@@ -2118,10 +2142,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             suggested_tags.join(", ").bright_cyan()
                         );
                         if !entry.tags.is_empty() {
-                            println!(
-                                "    Current tags: {}",
-                                entry.tags.join(", ").dimmed()
-                            );
+                            println!("    Current tags: {}", entry.tags.join(", ").dimmed());
                         }
                     }
 
@@ -2270,8 +2291,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let vault_entry = entries
                 .iter()
                 .find(|e| {
-                    e.name.to_lowercase() == entry.to_lowercase()
-                        || e.id.to_string() == entry
+                    e.name.to_lowercase() == entry.to_lowercase() || e.id.to_string() == entry
                 })
                 .ok_or_else(|| format!("Entry '{}' not found", entry))?;
 
@@ -2283,7 +2303,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 env_vars.push(("VAULTIC_USERNAME".to_string(), username.clone()));
             }
             if let Some(ref password) = vault_entry.password {
-                env_vars.push(("VAULTIC_PASSWORD".to_string(), password.expose().to_string()));
+                env_vars.push((
+                    "VAULTIC_PASSWORD".to_string(),
+                    password.expose().to_string(),
+                ));
             }
             if let Some(ref url) = vault_entry.url {
                 env_vars.push(("VAULTIC_URL".to_string(), url.clone()));
@@ -2301,7 +2324,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Add entry's env mappings
             for mapping in &vault_entry.env_mappings {
                 let value = match mapping.field.as_str() {
-                    "password" => vault_entry.password.as_ref().map(|p| p.expose().to_string()),
+                    "password" => vault_entry
+                        .password
+                        .as_ref()
+                        .map(|p| p.expose().to_string()),
                     "username" => vault_entry.username.clone(),
                     "url" => vault_entry.url.clone(),
                     field_name => vault_entry
@@ -2319,7 +2345,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             for mapping in &env_mappings {
                 if let Some((env_var, field_name)) = mapping.split_once('=') {
                     let value = match field_name {
-                        "password" => vault_entry.password.as_ref().map(|p| p.expose().to_string()),
+                        "password" => vault_entry
+                            .password
+                            .as_ref()
+                            .map(|p| p.expose().to_string()),
                         "username" => vault_entry.username.clone(),
                         "url" => vault_entry.url.clone(),
                         field_name => vault_entry
@@ -2334,7 +2363,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Output::warning(&format!("Field '{}' not found in entry", field_name));
                     }
                 } else {
-                    Output::warning(&format!("Invalid env mapping format '{}', expected ENV_VAR=field", mapping));
+                    Output::warning(&format!(
+                        "Invalid env mapping format '{}', expected ENV_VAR=field",
+                        mapping
+                    ));
                 }
             }
 
@@ -2342,7 +2374,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Output::header("Environment Variables");
                 for (name, value) in &env_vars {
                     // Mask passwords in output
-                    let display_value = if name.contains("PASSWORD") || name.contains("SECRET") || name.contains("KEY") {
+                    let display_value = if name.contains("PASSWORD")
+                        || name.contains("SECRET")
+                        || name.contains("KEY")
+                    {
                         format!("{}...", &value.chars().take(4).collect::<String>())
                     } else {
                         value.clone()
@@ -2364,7 +2399,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 cmd.env(name, value);
             }
 
-            let status = cmd.status().map_err(|e| format!("Failed to run command: {}", e))?;
+            let status = cmd
+                .status()
+                .map_err(|e| format!("Failed to run command: {}", e))?;
 
             if !status.success() {
                 if let Some(code) = status.code() {
@@ -3456,7 +3493,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 return Ok(());
                             }
                             // Remove old recovery key
-                            if let Some(old_key) = keyring.find_by_method(&UnlockMethod::RecoveryKey)
+                            if let Some(old_key) =
+                                keyring.find_by_method(&UnlockMethod::RecoveryKey)
                             {
                                 let old_id = old_key.id;
                                 keyring.remove_key(&old_id)?;
@@ -3519,7 +3557,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Output::success("Recovery key has been added to your vault.");
                         Output::info(&format!("Fingerprint: {}", recovery_key.fingerprint()));
                         Output::info(&format!("Checksum: {}", recovery_key.checksum()));
-                        Output::info("Tip: Use 'vaultic recovery generate --qr' to display a QR code.");
+                        Output::info(
+                            "Tip: Use 'vaultic recovery generate --qr' to display a QR code.",
+                        );
                     }
                     UnlockMethodType::Yubikey => {
                         Output::warning("YubiKey setup will be implemented in Phase 3");
@@ -3878,10 +3918,12 @@ vrun() {
     shift
     vaultic exec "$entry" -- "$@"
 }
-"#.to_string();
+"#
+    .to_string();
 
     if fzf {
-        script.push_str(r#"
+        script.push_str(
+            r#"
 # FZF integration (requires fzf)
 vf() {
     local entry
@@ -3901,7 +3943,8 @@ vfe() {
         vaultic exec "$entry" -- "$@"
     fi
 }
-"#);
+"#,
+        );
     }
 
     script
@@ -3948,10 +3991,12 @@ if type compdef &>/dev/null; then
     }
     compdef _vaultic_entries vg vcp vrun
 fi
-"#.to_string();
+"#
+    .to_string();
 
     if fzf {
-        script.push_str(r#"
+        script.push_str(
+            r#"
 # FZF integration (requires fzf)
 vf() {
     local entry
@@ -3971,7 +4016,8 @@ vfe() {
         vaultic exec "$entry" -- "$@"
     fi
 }
-"#);
+"#,
+        );
     }
 
     script
@@ -4008,10 +4054,12 @@ function vrun
     set -e argv[1]
     vaultic exec $entry -- $argv
 end
-"#.to_string();
+"#
+    .to_string();
 
     if fzf {
-        script.push_str(r#"
+        script.push_str(
+            r#"
 # FZF integration (requires fzf)
 function vf
     set entry (vaultic list --json 2>/dev/null | jq -r '.[].name' | fzf --prompt="Select entry: ")
@@ -4029,7 +4077,8 @@ function vfe
         vaultic exec "$entry" -- $argv
     end
 end
-"#);
+"#,
+        );
     }
 
     script
@@ -4070,7 +4119,8 @@ function vrun {
     )
     vaultic exec $Entry -- @Command
 }
-"#.to_string();
+"#
+    .to_string();
 
     if fzf {
         script.push_str(r#"

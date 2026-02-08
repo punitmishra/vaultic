@@ -15,17 +15,12 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": {},
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cargo build --release 2>&1 | tail -5"
-          },
-          {
-            "type": "command",
-            "command": "cargo test 2>&1 | tail -10"
-          }
-        ]
+        "type": "command",
+        "command": "cargo build --release 2>&1 | tail -5"
+      },
+      {
+        "type": "command",
+        "command": "cargo test 2>&1 | tail -10"
       }
     ]
   }
