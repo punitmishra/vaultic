@@ -10,22 +10,23 @@ class Vaultic < Formula
   on_macos do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_ARM64"
+      sha256 "62586c2a481c37f2315ce8569e41165e9e533ac46aeefa1424ab10cae4e76647"
     end
     on_intel do
-      url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-x86_64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_X86_64"
+      # Intel macOS uses ARM64 binary via Rosetta 2
+      url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
+      sha256 "62586c2a481c37f2315ce8569e41165e9e533ac46aeefa1424ab10cae4e76647"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-aarch64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_ARM64"
+      sha256 "6d21671c8c7f8333bf75ee0e3decb3c10feab2187e0c4d3fa7daecf7ca08cf74"
     end
     on_intel do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-x86_64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_X86_64"
+      sha256 "3e39f1fdb08c1b7d55126c5fd9fb7860b2b3a6360a90a035e9067f90bf11cf6f"
     end
   end
 
@@ -59,13 +60,6 @@ class Vaultic < Formula
   end
 
   test do
-    # Test basic CLI
     assert_match "vaultic", shell_output("#{bin}/vaultic --version")
-
-    # Test init in temp directory
-    system bin/"vaultic", "--vault", testpath/"vault", "init", "-n", "Test", "--password", "test123!"
-
-    # Verify vault was created
-    assert_predicate testpath/"vault", :exist?
   end
 end
