@@ -1,11 +1,13 @@
 [package]
 name = "vaultic"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Punit"]
 description = "Local-first, hardware-secured password manager with AI-powered management"
 license = "MIT"
-repository = "https://github.com/yourusername/vaultic"
+repository = "https://github.com/punitmishra/vaultic"
+homepage = "https://github.com/punitmishra/vaultic"
+readme = "README.md"
 keywords = ["password-manager", "security", "fido2", "encryption", "cli"]
 categories = ["command-line-utilities", "cryptography"]
 
