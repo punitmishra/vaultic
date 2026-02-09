@@ -7,6 +7,10 @@ use vaultic::crypto::{MasterKey, PasswordAnalyzer, PasswordGenerator};
 use vaultic::models::{EntryType, PasswordStrength, SensitiveString, VaultEntry};
 use vaultic::storage::VaultStorage;
 
+// For TOTP QR code scanning tests
+use image;
+use qrcode;
+
 /// Create a temporary vault for testing
 fn create_test_vault() -> (tempfile::TempDir, VaultStorage, MasterKey) {
     // Each call creates a unique temp directory
@@ -681,4 +685,82 @@ fn test_vault_entry_with_env_mappings() {
     assert_eq!(entry.env_mappings.len(), 2);
     assert_eq!(entry.env_mappings[0].env_var, "AWS_ACCESS_KEY_ID");
     assert_eq!(entry.env_mappings[1].field, "password");
+}
+
+// ============================================================================
+// TOTP QR Scanning Tests
+// ============================================================================
+
+#[test]
+fn test_vault_entry_with_totp() {
+    let (_temp_dir, mut storage, master_key) = create_test_vault();
+    storage.unlock(&master_key).unwrap();
+
+    // Create entry with TOTP
+    let mut entry = VaultEntry::new("GitHub", EntryType::Password)
+        .with_username("user@github.com")
+        .with_password("secret123");
+    entry.totp_secret = Some(SensitiveString::new("JBSWY3DPEHPK3PXP"));
+
+    storage.add_entry(&entry).unwrap();
+
+    // Retrieve and verify
+    let entries = storage.list_entries().unwrap();
+    let found = entries.iter().find(|e| e.name == "GitHub").unwrap();
+    assert!(found.totp_secret.is_some());
+    assert_eq!(
+        found.totp_secret.as_ref().unwrap().expose(),
+        "JBSWY3DPEHPK3PXP"
+    );
+
+    // Verify TOTP code generation works
+    let totp = vaultic::totp::Totp::new(found.totp_secret.as_ref().unwrap().expose()).unwrap();
+    let code = totp.generate().unwrap();
+    assert_eq!(code.len(), 6);
+}
+
+#[test]
+fn test_totp_from_uri_roundtrip() {
+    let uri = "otpauth://totp/GitHub:user@github.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub";
+    let totp = vaultic::totp::Totp::from_uri(uri).unwrap();
+
+    assert_eq!(totp.get_issuer(), Some("GitHub"));
+    assert_eq!(totp.get_account(), Some("user@github.com"));
+
+    // Secret should roundtrip
+    let secret = totp.secret_base32();
+    let totp2 = vaultic::totp::Totp::new(&secret).unwrap();
+    let code1 = totp.generate().unwrap();
+    let code2 = totp2.generate().unwrap();
+    assert_eq!(code1, code2);
+}
+
+#[test]
+fn test_totp_qr_scan_roundtrip() {
+    // Generate a TOTP URI and QR code, then scan it back
+    let original = vaultic::totp::Totp::new("JBSWY3DPEHPK3PXP")
+        .unwrap()
+        .issuer("IntegrationTest")
+        .account("test@example.com");
+    let uri = original.to_uri();
+
+    // Generate QR code as image
+    let code = qrcode::QrCode::new(uri.as_bytes()).unwrap();
+    let img = code.render::<image::Luma<u8>>().build();
+
+    // Save to temp file
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("test_totp.png");
+    img.save(&path).unwrap();
+
+    // Scan it back
+    let scanned = vaultic::totp::Totp::scan_qr_image(&path).unwrap();
+    assert_eq!(scanned.get_issuer(), Some("IntegrationTest"));
+    assert_eq!(scanned.get_account(), Some("test@example.com"));
+
+    // Both should generate same TOTP codes
+    assert_eq!(
+        original.generate_at(1000000).unwrap(),
+        scanned.generate_at(1000000).unwrap()
+    );
 }

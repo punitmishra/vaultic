@@ -1045,5 +1045,31 @@ This tracker consolidates outputs from 4 parallel planning agents:
 
 All implementation plans are complete and ready for execution. Phase 1 (Key Hierarchy) should be implemented first as it's the foundation for phases 2-5.
 
-**Last Updated:** 2026-01-04
-**Session Branch:** `claude/continue-vaultic-Qi4N8`
+### TOTP QR Code Scanning (Completed 2026-02-08)
+
+**New Feature:** Full TOTP QR code scanning support added.
+
+**Files Modified:**
+- `Cargo.toml` - Added `rqrr = "0.9"`, `jpeg` feature on `image` crate
+- `src/totp/mod.rs` - Added `scan_qr_image()`, accessor methods, `QrCodeError`
+- `src/cli/mod.rs` - Added `totp scan`/`totp show` subcommands, `--totp-secret`/`--totp-uri` flags on `add`, TOTP display in entry view
+- `tests/integration_tests.rs` - 3 new TOTP integration tests
+
+**New Commands:**
+```bash
+vaultic totp scan <image.png>              # Scan QR code, create/attach entry
+vaultic totp scan <image.png> --entry X    # Attach to existing entry
+vaultic totp scan <image.png> --dry-run    # Decode without saving
+vaultic totp show <query>                  # Show TOTP code with countdown
+vaultic totp show <query> --watch          # Live countdown
+vaultic totp show <query> --copy           # Copy to clipboard
+vaultic add "X" --totp-secret "BASE32"     # Add with TOTP secret
+vaultic add "X" --totp-uri "otpauth://..." # Add with otpauth URI
+```
+
+**Test Results:** 291 tests passing (122 bin + 120 lib + 44 integration + 5 doc)
+
+---
+
+**Last Updated:** 2026-02-08
+**Session Branch:** `main`

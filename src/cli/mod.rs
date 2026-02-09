@@ -129,6 +129,14 @@ pub enum Commands {
         /// Auto-suggest tags based on entry name, URL, and type
         #[arg(long)]
         auto_tag: bool,
+
+        /// TOTP secret (base32 encoded)
+        #[arg(long)]
+        totp_secret: Option<String>,
+
+        /// TOTP URI (otpauth:// format, e.g. from QR code)
+        #[arg(long)]
+        totp_uri: Option<String>,
     },
 
     /// Get/show an entry
@@ -422,6 +430,13 @@ pub enum Commands {
         #[command(subcommand)]
         command: RecoveryCommands,
     },
+
+    /// TOTP operations (scan QR codes, show codes)
+    #[command(name = "totp")]
+    TotpCmd {
+        #[command(subcommand)]
+        command: TotpCommands,
+    },
 }
 
 /// Batch operation subcommands
@@ -630,6 +645,42 @@ pub enum RecoveryCommands {
         /// Session timeout in minutes
         #[arg(short, long, default_value = "15")]
         timeout: u32,
+    },
+}
+
+/// TOTP subcommands
+#[derive(Subcommand)]
+pub enum TotpCommands {
+    /// Scan a QR code image to extract TOTP secret
+    Scan {
+        /// Path to QR code image file (PNG or JPEG)
+        image: String,
+
+        /// Add to an existing entry (name or ID)
+        #[arg(short, long)]
+        entry: Option<String>,
+
+        /// Create a new entry with this name
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Show the decoded URI without saving
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Show current TOTP code for an entry
+    Show {
+        /// Entry name or ID
+        query: String,
+
+        /// Copy code to clipboard
+        #[arg(short, long)]
+        copy: bool,
+
+        /// Continuously show codes (refresh every period)
+        #[arg(short, long)]
+        watch: bool,
     },
 }
 
@@ -935,6 +986,27 @@ pub fn display_entry(entry: &VaultEntry, show_password: bool) {
 
     if let Some(ref url) = entry.url {
         Output::field("URL", url);
+    }
+
+    if let Some(ref totp_secret) = entry.totp_secret {
+        match crate::totp::Totp::new(totp_secret.expose()) {
+            Ok(totp) => {
+                if let Ok(display) = crate::totp::TotpDisplay::from_totp(&totp) {
+                    Output::field(
+                        "TOTP",
+                        &format!(
+                            "{} {} ({}s remaining)",
+                            display.formatted_code(),
+                            display.progress_bar(15),
+                            display.remaining,
+                        ),
+                    );
+                }
+            }
+            Err(_) => {
+                Output::field("TOTP", "(invalid secret)");
+            }
+        }
     }
 
     if let Some(ref folder) = entry.folder {
@@ -1271,6 +1343,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             fields,
             notes,
             auto_tag,
+            totp_secret,
+            totp_uri,
         } => {
             // Require unlocked vault
             let session_mgr = crate::session::SessionManager::new()?;
@@ -1360,6 +1434,38 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            // Handle TOTP secret/URI
+            if let Some(ref uri) = totp_uri {
+                match crate::totp::Totp::from_uri(uri) {
+                    Ok(totp) => {
+                        entry.totp_secret =
+                            Some(crate::models::SensitiveString::new(totp.secret_base32()));
+                        Output::info(&format!(
+                            "TOTP configured{}",
+                            totp.get_issuer()
+                                .map(|i| format!(" (issuer: {})", i))
+                                .unwrap_or_default()
+                        ));
+                    }
+                    Err(e) => {
+                        Output::error(&format!("Invalid TOTP URI: {}", e));
+                        return Ok(());
+                    }
+                }
+            } else if let Some(ref secret) = totp_secret {
+                match crate::totp::Totp::new(secret) {
+                    Ok(_) => {
+                        entry.totp_secret =
+                            Some(crate::models::SensitiveString::new(secret.clone()));
+                        Output::info("TOTP secret configured");
+                    }
+                    Err(e) => {
+                        Output::error(&format!("Invalid TOTP secret: {}", e));
+                        return Ok(());
+                    }
+                }
+            }
+
             // Save to vault
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
             storage.unlock(&master_key)?;
@@ -1377,6 +1483,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             if !entry.custom_fields.is_empty() {
                 Output::field("Custom fields", &entry.custom_fields.len().to_string());
+            }
+            if entry.totp_secret.is_some() {
+                Output::field("TOTP", "configured");
             }
             Ok(())
         }
@@ -1860,10 +1969,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             display_entry(entry, false);
 
             // Offer to copy password
-            if entry.password.is_some()
-                && Prompts::confirm("Copy password to clipboard?", true)? {
-                    copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
-                }
+            if entry.password.is_some() && Prompts::confirm("Copy password to clipboard?", true)? {
+                copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
+            }
 
             Ok(())
         }
@@ -3883,6 +3991,237 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+
+        Commands::TotpCmd { command } => {
+            match command {
+                TotpCommands::Scan {
+                    image,
+                    entry,
+                    name,
+                    dry_run,
+                } => {
+                    let path = std::path::Path::new(&image);
+
+                    if !path.exists() {
+                        Output::error(&format!("File not found: {}", image));
+                        return Ok(());
+                    }
+
+                    // Scan the QR code
+                    let spinner = Output::spinner("Scanning QR code...");
+                    let totp = match crate::totp::Totp::scan_qr_image(path) {
+                        Ok(totp) => {
+                            spinner.finish_and_clear();
+                            totp
+                        }
+                        Err(e) => {
+                            spinner.finish_and_clear();
+                            Output::error(&format!("Failed to scan QR code: {}", e));
+                            return Ok(());
+                        }
+                    };
+
+                    let secret = totp.secret_base32();
+                    let uri = totp.to_uri();
+                    let issuer = totp.get_issuer().map(String::from);
+                    let account = totp.get_account().map(String::from);
+
+                    // Display decoded information
+                    Output::success("QR code decoded successfully");
+                    if let Some(ref issuer) = issuer {
+                        Output::field("Issuer", issuer);
+                    }
+                    if let Some(ref account) = account {
+                        Output::field("Account", account);
+                    }
+                    Output::field("URI", &uri);
+
+                    if dry_run {
+                        Output::field("Secret", &secret);
+                        return Ok(());
+                    }
+
+                    // Require unlocked vault for save operations
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vault_path, master_key) = session_mgr
+                        .load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+                    let _ = session_mgr.refresh(15);
+
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+
+                    if let Some(ref entry_query) = entry {
+                        // Attach to existing entry
+                        let filter = crate::models::SearchFilter {
+                            query: Some(entry_query.clone()),
+                            entry_type: None,
+                            tags: vec![],
+                            folder: None,
+                            favorites_only: false,
+                            needs_rotation: false,
+                            weak_passwords: false,
+                            offset: 0,
+                            limit: Some(10),
+                        };
+                        let entries = storage.search_entries(&filter)?;
+
+                        if entries.is_empty() {
+                            Output::error(&format!("No entry found matching '{}'", entry_query));
+                            return Ok(());
+                        }
+
+                        let mut target = if entries.len() == 1 {
+                            entries.into_iter().next().unwrap()
+                        } else {
+                            let idx =
+                                Prompts::select_entry(&entries, "Select entry to add TOTP to:")?;
+                            entries.into_iter().nth(idx).unwrap()
+                        };
+
+                        // Warn if entry already has TOTP
+                        if target.totp_secret.is_some()
+                            && !Prompts::confirm(
+                                &format!(
+                                    "'{}' already has TOTP configured. Overwrite?",
+                                    target.name
+                                ),
+                                false,
+                            )?
+                        {
+                            Output::info("Cancelled");
+                            return Ok(());
+                        }
+
+                        target.totp_secret = Some(crate::models::SensitiveString::new(secret));
+                        target.updated_at = chrono::Utc::now();
+                        storage.update_entry(&target)?;
+                        Output::success(&format!("TOTP added to '{}'", target.name));
+                    } else {
+                        // Create new entry
+                        let entry_name = if let Some(ref n) = name {
+                            n.clone()
+                        } else {
+                            // Auto-generate name from issuer/account
+                            match (&issuer, &account) {
+                                (Some(i), Some(a)) => format!("{} ({})", i, a),
+                                (Some(i), None) => i.clone(),
+                                (None, Some(a)) => a.clone(),
+                                (None, None) => dialoguer::Input::<String>::new()
+                                    .with_prompt("Entry name")
+                                    .interact()?,
+                            }
+                        };
+
+                        let mut new_entry = crate::models::VaultEntry::new(
+                            &entry_name,
+                            crate::models::EntryType::Totp,
+                        );
+                        new_entry.totp_secret = Some(crate::models::SensitiveString::new(secret));
+                        if let Some(ref a) = account {
+                            new_entry.username = Some(a.clone());
+                        }
+
+                        storage.add_entry(&new_entry)?;
+                        Output::success(&format!("Entry '{}' created with TOTP", entry_name));
+                    }
+
+                    // Show current TOTP code
+                    if let Ok(display) = crate::totp::TotpDisplay::from_totp(&totp) {
+                        println!(
+                            "\n  {} {} {} ({}s remaining)",
+                            "Current code:".dimmed(),
+                            display.formatted_code().bold(),
+                            display.progress_bar(15),
+                            display.remaining,
+                        );
+                    }
+
+                    Ok(())
+                }
+
+                TotpCommands::Show { query, copy, watch } => {
+                    // Require unlocked vault
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vault_path, master_key) = session_mgr
+                        .load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+                    let _ = session_mgr.refresh(15);
+
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+
+                    let filter = crate::models::SearchFilter {
+                        query: Some(query.clone()),
+                        entry_type: None,
+                        tags: vec![],
+                        folder: None,
+                        favorites_only: false,
+                        needs_rotation: false,
+                        weak_passwords: false,
+                        offset: 0,
+                        limit: Some(10),
+                    };
+                    let entries = storage.search_entries(&filter)?;
+
+                    if entries.is_empty() {
+                        Output::error(&format!("No entry found matching '{}'", query));
+                        return Ok(());
+                    }
+
+                    let entry_ref = if entries.len() == 1 {
+                        &entries[0]
+                    } else {
+                        let idx = Prompts::select_entry(&entries, "Select entry:")?;
+                        &entries[idx]
+                    };
+
+                    let secret = match &entry_ref.totp_secret {
+                        Some(s) => s.expose().to_string(),
+                        None => {
+                            Output::error(&format!("'{}' has no TOTP configured", entry_ref.name));
+                            return Ok(());
+                        }
+                    };
+
+                    let totp = crate::totp::Totp::new(&secret)?;
+
+                    if watch {
+                        Output::info(&format!(
+                            "Showing TOTP codes for '{}' (Ctrl+C to stop)",
+                            entry_ref.name
+                        ));
+                        loop {
+                            if let Ok(display) = crate::totp::TotpDisplay::from_totp(&totp) {
+                                print!(
+                                    "\r  {} {} {}  ",
+                                    display.formatted_code().bold(),
+                                    display.progress_bar(20),
+                                    format!("{}s", display.remaining).dimmed(),
+                                );
+                                use std::io::Write;
+                                std::io::stdout().flush()?;
+                            }
+                            std::thread::sleep(Duration::from_secs(1));
+                        }
+                    } else {
+                        let display = crate::totp::TotpDisplay::from_totp(&totp)?;
+                        println!(
+                            "  {} {} {}",
+                            display.formatted_code().bold(),
+                            display.progress_bar(20),
+                            format!("{}s remaining", display.remaining).dimmed(),
+                        );
+
+                        if copy {
+                            copy_to_clipboard(&totp.generate()?, 30)?;
+                        }
+                    }
+
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
@@ -4284,6 +4623,160 @@ mod tests {
                 assert_eq!(restore, None);
             }
             _ => panic!("Expected History command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_add_with_totp_secret() {
+        let cli = Cli::try_parse_from([
+            "vaultic",
+            "add",
+            "GitHub",
+            "--username",
+            "user@example.com",
+            "--totp-secret",
+            "JBSWY3DPEHPK3PXP",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Add {
+                name,
+                totp_secret,
+                totp_uri,
+                ..
+            } => {
+                assert_eq!(name, "GitHub");
+                assert_eq!(totp_secret, Some("JBSWY3DPEHPK3PXP".to_string()));
+                assert_eq!(totp_uri, None);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_add_with_totp_uri() {
+        let cli = Cli::try_parse_from([
+            "vaultic",
+            "add",
+            "GitHub",
+            "--totp-uri",
+            "otpauth://totp/GitHub:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Add { totp_uri, .. } => {
+                assert!(totp_uri.is_some());
+                assert!(totp_uri.unwrap().starts_with("otpauth://"));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_totp_scan() {
+        let cli = Cli::try_parse_from([
+            "vaultic",
+            "totp",
+            "scan",
+            "/path/to/qr.png",
+            "--entry",
+            "GitHub",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::TotpCmd {
+                command:
+                    TotpCommands::Scan {
+                        image,
+                        entry,
+                        name,
+                        dry_run,
+                    },
+            } => {
+                assert_eq!(image, "/path/to/qr.png");
+                assert_eq!(entry, Some("GitHub".to_string()));
+                assert_eq!(name, None);
+                assert!(!dry_run);
+            }
+            _ => panic!("Expected Totp Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_totp_scan_dry_run() {
+        let cli = Cli::try_parse_from(["vaultic", "totp", "scan", "/path/to/qr.png", "--dry-run"])
+            .unwrap();
+
+        match cli.command {
+            Commands::TotpCmd {
+                command: TotpCommands::Scan { image, dry_run, .. },
+            } => {
+                assert_eq!(image, "/path/to/qr.png");
+                assert!(dry_run);
+            }
+            _ => panic!("Expected Totp Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_totp_scan_with_name() {
+        let cli = Cli::try_parse_from([
+            "vaultic",
+            "totp",
+            "scan",
+            "/path/to/qr.png",
+            "--name",
+            "My Service",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::TotpCmd {
+                command:
+                    TotpCommands::Scan {
+                        image, name, entry, ..
+                    },
+            } => {
+                assert_eq!(image, "/path/to/qr.png");
+                assert_eq!(name, Some("My Service".to_string()));
+                assert_eq!(entry, None);
+            }
+            _ => panic!("Expected Totp Scan command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_totp_show() {
+        let cli = Cli::try_parse_from(["vaultic", "totp", "show", "GitHub", "--copy"]).unwrap();
+
+        match cli.command {
+            Commands::TotpCmd {
+                command: TotpCommands::Show { query, copy, watch },
+            } => {
+                assert_eq!(query, "GitHub");
+                assert!(copy);
+                assert!(!watch);
+            }
+            _ => panic!("Expected Totp Show command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_totp_show_watch() {
+        let cli = Cli::try_parse_from(["vaultic", "totp", "show", "GitHub", "--watch"]).unwrap();
+
+        match cli.command {
+            Commands::TotpCmd {
+                command: TotpCommands::Show { query, copy, watch },
+            } => {
+                assert_eq!(query, "GitHub");
+                assert!(!copy);
+                assert!(watch);
+            }
+            _ => panic!("Expected Totp Show command"),
         }
     }
 }

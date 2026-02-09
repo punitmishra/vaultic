@@ -19,7 +19,7 @@ This document provides context for Claude to continue developing Vaultic.
 ### Checkpoint: 2026-02-08
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 264 passing (110 bin + 108 lib + 41 integration + 5 doctests)
+**Tests**: 291 passing (122 bin + 120 lib + 44 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED
 **CI/CD**: GitHub Actions configured and passing
@@ -30,7 +30,7 @@ This document provides context for Claude to continue developing Vaultic.
 ```bash
 # Verify everything works
 cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (264 pass)
+cargo test                   # Run all tests (291 pass)
 ./target/release/vaultic --help  # Show all commands
 
 # Key commands
@@ -43,6 +43,8 @@ cargo test                   # Run all tests (264 pass)
 ./target/release/vaultic unlock-method     # Manage unlock methods
 ./target/release/vaultic identity show     # View/create identity
 ./target/release/vaultic share             # Share entries securely
+./target/release/vaultic totp scan         # Scan TOTP QR codes
+./target/release/vaultic totp show         # Show TOTP codes
 ```
 
 ---
@@ -62,7 +64,8 @@ cargo test                   # Run all tests (264 pass)
 | 7 | Password History (tracking, listing, restore) | ✅ Complete |
 | 8 | Batch Operations (tag, delete, move, favorite) | ✅ Complete |
 | 9 | Git Credential Helper (get, store, erase) | ✅ Complete |
-| 10 | Integration Tests (41 comprehensive tests) | ✅ Complete |
+| 10 | Integration Tests (44 comprehensive tests) | ✅ Complete |
+| 11 | TOTP QR Code Scanning (PNG/JPEG, scan/show/watch) | ✅ Complete |
 | - | Web Client (terminal-style demo) | ✅ Complete |
 | - | Demo Recordings (asciinema) | ✅ Complete |
 
@@ -80,7 +83,7 @@ cargo test                   # Run all tests (264 pass)
 
 | Module | Status | Lines | Description |
 |--------|--------|-------|-------------|
-| `cli` | COMPLETE | ~4200 | All CLI commands + sharing/identity/batch/history/credential/migrate |
+| `cli` | COMPLETE | ~4800 | All CLI commands + sharing/identity/batch/history/credential/migrate/totp |
 | `tui` | COMPLETE | ~650 | Full ratatui TUI with vim keys |
 | `crypto` | COMPLETE | ~1200 | XChaCha20-Poly1305, Argon2id, key hierarchy |
 | `crypto/keys` | NEW | ~430 | VaultKey, KEK, UnlockMethod, VaultKeyring |
@@ -92,14 +95,14 @@ cargo test                   # Run all tests (264 pass)
 | `session` | COMPLETE | ~250 | Compressed sessions, auto-expiry |
 | `ai` | COMPLETE | ~600 | Ollama integration, HIBP checking |
 | `models` | COMPLETE | ~250 | VaultEntry, SensitiveString, PasswordHistory |
-| `totp` | COMPLETE | ~150 | RFC 6238 TOTP generation |
+| `totp` | COMPLETE | ~650 | RFC 6238 TOTP generation, QR code scanning (PNG/JPEG), otpauth URI |
 | `gpg` | COMPLETE | ~350 | Sequoia OpenPGP integration |
 | `sharing` | COMPLETE | ~400 | X25519 key exchange, identity management, QR codes |
 | `fido2` | COMPLETE | ~300 | Structure ready (needs hardware) |
 | `import` | COMPLETE | ~250 | Bitwarden, LastPass, 1Password |
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
 | `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
-| `tests` | COMPLETE | ~800 | 229 tests (unit, integration, doctests) |
+| `tests` | COMPLETE | ~900 | 291 tests (unit, integration, doctests) |
 
 ---
 
@@ -150,7 +153,7 @@ vaultic tui
 | `unlock` | ✅ WORKING | Password + session creation |
 | `lock` | ✅ WORKING | Secure session destruction |
 | `status` | ✅ WORKING | Shows vault/session info |
-| `add` | ✅ WORKING | Full entry creation with tags, favorites, custom fields, notes |
+| `add` | ✅ WORKING | Full entry creation with tags, favorites, custom fields, notes, TOTP |
 | `list` | ✅ WORKING | Filters by tags, folder, favorites |
 | `generate` | ✅ WORKING | Password gen with entropy |
 | `get` | ✅ WORKING | Entry retrieval |
@@ -175,16 +178,18 @@ vaultic tui
 | `suggest` | ✅ WORKING | AI auto-tagging, analysis, breach checking |
 | `exec` | ✅ WORKING | Run commands with vault secrets as env vars |
 | `shell-init` | ✅ WORKING | Generate shell aliases (bash/zsh/fish/powershell) |
+| `totp scan` | ✅ WORKING | Scan QR code images (PNG/JPEG) for TOTP secrets |
+| `totp show` | ✅ WORKING | Show TOTP codes with countdown, copy, watch mode |
 
 ---
 
 ## Test Results (Latest)
 
 ```
-cargo test: 264 tests passing
-  - 110 bin tests (CLI parsing, commands)
-  - 108 lib tests (crypto, storage, models, migration, recovery, ai)
-  - 41 integration tests (end-to-end workflows)
+cargo test: 291 tests passing
+  - 122 bin tests (CLI parsing, commands)
+  - 120 lib tests (crypto, storage, models, migration, recovery, ai, totp)
+  - 44 integration tests (end-to-end workflows)
   - 5 doctests (code examples in documentation)
 
 cargo build --release: Success
@@ -194,7 +199,7 @@ cargo fmt --check: Formatted
 Local workflow test:
 ✓ init       - Vault created with KDF params
 ✓ unlock     - Session created (15 min expiry)
-✓ add        - Entries with tags, custom fields, notes
+✓ add        - Entries with tags, custom fields, notes, TOTP (--totp-secret/--totp-uri)
 ✓ generate   - Strong password with entropy analysis
 ✓ list       - Formatted table with filters
 ✓ get        - Entry retrieval with clipboard
@@ -212,6 +217,8 @@ Local workflow test:
 ✓ shell-init - Generate shell integration scripts
 ✓ identity   - Identity management (show/add/list/remove/export)
 ✓ share      - Secure entry sharing with X25519 key exchange
+✓ totp scan  - QR code scanning from PNG/JPEG images
+✓ totp show  - TOTP code display with countdown, copy, watch mode
 ✓ tui        - Full terminal UI with vim keys
 ✓ import     - Bitwarden, LastPass, 1Password
 ✓ export     - JSON, CSV, encrypted backup
@@ -381,7 +388,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **264 tests passing** - Keep them green (110 bin + 108 lib + 41 integration + 5 doc)
+2. **291 tests passing** - Keep them green (122 bin + 120 lib + 44 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
@@ -401,6 +408,9 @@ rm -rf /tmp/test_vault
 19. **Shell Integration** - exec command + shell-init for bash/zsh/fish/powershell
 20. **Identity Management** - Full X25519 keypair generation, export/import
 21. **Secure Sharing** - Entry sharing with ephemeral key exchange
+22. **TOTP QR Scanning** - Scan PNG/JPEG QR codes for otpauth URIs, `totp scan`/`totp show` commands
+23. **TOTP on Add** - `--totp-secret` and `--totp-uri` flags on `add` command
+24. **TOTP Display** - TOTP codes shown in `display_entry` with countdown bar
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)

@@ -21,6 +21,9 @@ pub enum TotpError {
 
     #[error("System time error")]
     SystemTimeError,
+
+    #[error("QR code error: {0}")]
+    QrCodeError(String),
 }
 
 pub type TotpResult<T> = Result<T, TotpError>;
@@ -115,6 +118,21 @@ impl Totp {
     pub fn account(mut self, account: impl Into<String>) -> Self {
         self.account = Some(account.into());
         self
+    }
+
+    /// Get the issuer name
+    pub fn get_issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
+    }
+
+    /// Get the account name
+    pub fn get_account(&self) -> Option<&str> {
+        self.account.as_deref()
+    }
+
+    /// Get the secret as a base32-encoded string
+    pub fn secret_base32(&self) -> String {
+        encode_base32(&self.secret)
     }
 
     /// Generate current TOTP code
@@ -286,8 +304,10 @@ impl Totp {
             secret.ok_or_else(|| TotpError::InvalidSecret("Missing secret".to_string()))?;
         let decoded = decode_base32(&secret)?;
 
-        // Extract account from path
-        let path = url.path().trim_start_matches('/');
+        // Extract account from path (URL-decode the path components)
+        let path = urlencoding::decode(url.path().trim_start_matches('/'))
+            .unwrap_or_default()
+            .to_string();
         let account = if path.contains(':') {
             path.split(':').next_back().map(|s| s.to_string())
         } else if !path.is_empty() {
@@ -314,6 +334,39 @@ impl Totp {
         rand::rngs::OsRng.fill_bytes(&mut bytes);
 
         encode_base32(&bytes)
+    }
+
+    /// Scan a QR code image file and extract an otpauth:// URI
+    ///
+    /// Supports PNG and JPEG image files containing TOTP QR codes.
+    /// Returns a parsed Totp instance if a valid otpauth:// URI is found.
+    pub fn scan_qr_image(path: &std::path::Path) -> TotpResult<Self> {
+        let img = image::open(path)
+            .map_err(|e| {
+                TotpError::QrCodeError(format!("Failed to open image '{}': {}", path.display(), e))
+            })?
+            .to_luma8();
+
+        let mut prepared = rqrr::PreparedImage::prepare(img);
+        let grids = prepared.detect_grids();
+
+        if grids.is_empty() {
+            return Err(TotpError::QrCodeError(
+                "No QR code detected in image".to_string(),
+            ));
+        }
+
+        for grid in &grids {
+            if let Ok((_meta, content)) = grid.decode() {
+                if content.starts_with("otpauth://") {
+                    return Totp::from_uri(&content);
+                }
+            }
+        }
+
+        Err(TotpError::QrCodeError(
+            "No otpauth:// URI found in QR code(s)".to_string(),
+        ))
     }
 }
 
@@ -516,5 +569,70 @@ mod tests {
         // Test formatted output
         let formatted = display.formatted_code();
         assert!(formatted.contains(' '));
+    }
+
+    #[test]
+    fn test_scan_qr_error_nonexistent() {
+        let result = Totp::scan_qr_image(std::path::Path::new("/nonexistent/image.png"));
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TotpError::QrCodeError(_)));
+    }
+
+    #[test]
+    fn test_secret_base32_roundtrip() {
+        let totp = Totp::new(TEST_SECRET).unwrap();
+        let secret = totp.secret_base32();
+        let totp2 = Totp::new(&secret).unwrap();
+        assert_eq!(
+            totp.generate_at(59).unwrap(),
+            totp2.generate_at(59).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_get_issuer_and_account() {
+        let uri = "otpauth://totp/Example:alice@google.com?secret=JBSWY3DPEHPK3PXP&issuer=Example";
+        let totp = Totp::from_uri(uri).unwrap();
+        assert_eq!(totp.get_issuer(), Some("Example"));
+        assert_eq!(totp.get_account(), Some("alice@google.com"));
+    }
+
+    #[test]
+    fn test_get_issuer_none() {
+        let totp = Totp::new(TEST_SECRET).unwrap();
+        assert_eq!(totp.get_issuer(), None);
+        assert_eq!(totp.get_account(), None);
+    }
+
+    #[test]
+    fn test_scan_qr_from_generated_image() {
+        // Generate a QR code image, then scan it back
+        let original = Totp::new("JBSWY3DPEHPK3PXP")
+            .unwrap()
+            .issuer("TestIssuer")
+            .account("test@example.com");
+        let uri = original.to_uri();
+
+        // Generate QR code as image
+        let code = qrcode::QrCode::new(uri.as_bytes()).unwrap();
+        let img = code.render::<image::Luma<u8>>().build();
+
+        // Save to temp file
+        let dir = std::env::temp_dir().join("vaultic_test_qr");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test_totp.png");
+        img.save(&path).unwrap();
+
+        // Scan it back
+        let scanned = Totp::scan_qr_image(&path).unwrap();
+        assert_eq!(scanned.get_issuer(), Some("TestIssuer"));
+        assert_eq!(scanned.get_account(), Some("test@example.com"));
+        assert_eq!(
+            original.generate_at(59).unwrap(),
+            scanned.generate_at(59).unwrap()
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

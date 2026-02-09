@@ -44,9 +44,10 @@ A lightweight, security-focused password manager written in Rust with hardware a
 | AI auto-tagging | ✅ Working |
 | HIBP breach checking | ✅ Working |
 | TOTP/2FA support | ✅ Working |
+| TOTP QR code scanning (PNG/JPEG) | ✅ Working |
 | Identity management & secure sharing | ✅ Working |
 | X25519 key exchange | ✅ Working |
-| QR code generation | ✅ Working |
+| QR code generation & scanning | ✅ Working |
 | Simple web client | ✅ Working |
 | Password history (tracking + restore) | ✅ Working |
 | Batch operations (tag, delete, move) | ✅ Working |
@@ -268,6 +269,34 @@ vaultic suggest --analyze
 vaultic suggest --check-breaches
 ```
 
+### TOTP / Two-Factor Authentication
+
+```bash
+# Scan a QR code image to add TOTP
+vaultic totp scan ~/Downloads/github-2fa-qr.png
+
+# Scan and attach to existing entry
+vaultic totp scan ~/Downloads/qr.png --entry "GitHub"
+
+# Scan and preview without saving
+vaultic totp scan ~/Downloads/qr.png --dry-run
+
+# Add entry with TOTP secret directly
+vaultic add "GitHub" -u "user@example.com" --totp-secret "JBSWY3DPEHPK3PXP"
+
+# Add entry with otpauth:// URI
+vaultic add "GitHub" --totp-uri "otpauth://totp/GitHub:user?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"
+
+# Show current TOTP code
+vaultic totp show "GitHub"
+
+# Watch TOTP code with live countdown
+vaultic totp show "GitHub" --watch
+
+# Copy TOTP code to clipboard
+vaultic totp show "GitHub" --copy
+```
+
 ### Password Generation
 
 ```bash
@@ -481,10 +510,10 @@ cargo clippy
 ## Test Results (v2.0.0)
 
 ```
-cargo test: 264 tests passing
-  - 110 bin tests (CLI commands and parsing)
-  - 108 lib tests (crypto, storage, models, migration, recovery, ai)
-  - 41 integration tests (end-to-end workflows)
+cargo test: 291 tests passing
+  - 122 bin tests (CLI commands and parsing)
+  - 120 lib tests (crypto, storage, models, migration, recovery, ai, totp)
+  - 44 integration tests (end-to-end workflows)
   - 5 doctests (code examples)
 
 cargo build --release: Success
@@ -495,6 +524,7 @@ All features tested and working:
 ✓ init, unlock, lock, status
 ✓ add, list, get, edit, delete, search
 ✓ generate, health, history
+✓ totp (scan QR codes, show codes, watch)
 ✓ identity (show, export, add, list, remove)
 ✓ share (with expiration, one-time)
 ✓ recovery (generate, verify, unlock)
