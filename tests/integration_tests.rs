@@ -7,10 +7,6 @@ use vaultic::crypto::{MasterKey, PasswordAnalyzer, PasswordGenerator};
 use vaultic::models::{EntryType, PasswordStrength, SensitiveString, VaultEntry};
 use vaultic::storage::VaultStorage;
 
-// For TOTP QR code scanning tests
-use image;
-use qrcode;
-
 /// Create a temporary vault for testing
 fn create_test_vault() -> (tempfile::TempDir, VaultStorage, MasterKey) {
     // Each call creates a unique temp directory
