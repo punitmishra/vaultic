@@ -376,7 +376,11 @@ pub enum Commands {
     },
 
     /// Open interactive TUI mode
-    Tui,
+    Tui {
+        /// Color theme: default, dracula, solarized-dark, monochrome
+        #[arg(long, default_value = "default")]
+        theme: String,
+    },
 
     /// Manage vault configuration
     Config {
@@ -2945,10 +2949,17 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
 
-        Commands::Tui => {
+        Commands::Tui { theme } => {
             let vault_path = default_vault_path(&cli.vault);
+            let resolved_theme = crate::tui::theme::Theme::from_name(&theme).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown theme '{}'. Available: {}",
+                    theme,
+                    crate::tui::theme::THEME_NAMES.join(", ")
+                )
+            })?;
             Output::info("Starting TUI mode...");
-            crate::tui::run_with_vault(Some(&vault_path))?;
+            crate::tui::run_with_vault(Some(&vault_path), resolved_theme)?;
             Ok(())
         }
 

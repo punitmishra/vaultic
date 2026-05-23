@@ -116,9 +116,11 @@ impl GpgManager {
     pub fn is_valid(&self) -> bool {
         self.cert
             .with_policy(POLICY, None)
-            .map(|valid| match valid.revocation_status() {
-                sequoia_openpgp::types::RevocationStatus::Revoked(_) => false,
-                _ => true,
+            .map(|valid| {
+                !matches!(
+                    valid.revocation_status(),
+                    sequoia_openpgp::types::RevocationStatus::Revoked(_)
+                )
             })
             .unwrap_or(false)
     }

@@ -141,7 +141,7 @@ impl Fido2Auth {
     /// Create a challenge for FIDO2 operations
     fn _create_challenge(&self) -> Vec<u8> {
         let mut hasher = Sha256::new();
-        hasher.update(&self.salt);
+        hasher.update(self.salt);
         hasher.update(Uuid::new_v4().as_bytes());
         hasher.finalize().to_vec()
     }

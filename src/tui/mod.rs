@@ -2,6 +2,8 @@
 //!
 //! Interactive TUI mode using ratatui for a full-screen terminal experience.
 
+pub mod theme;
+
 use std::io::stdout;
 use std::time::Duration;
 
@@ -13,7 +15,6 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
@@ -23,6 +24,7 @@ use thiserror::Error;
 use crate::models::VaultEntry;
 use crate::session::SessionManager;
 use crate::storage::VaultStorage;
+use crate::tui::theme::Theme;
 
 /// TUI module errors
 #[derive(Debug, Error)]
@@ -78,11 +80,18 @@ pub struct App {
     pub status_message: Option<String>,
     /// Show password in detail view
     pub show_password: bool,
+    /// Active theme
+    pub theme: Theme,
 }
 
 impl App {
     /// Create a new App instance
     pub fn new(storage: VaultStorage) -> TuiResult<Self> {
+        Self::with_theme(storage, Theme::default_theme())
+    }
+
+    /// Create a new App instance with a specific theme
+    pub fn with_theme(storage: VaultStorage, theme: Theme) -> TuiResult<Self> {
         let entries = storage
             .list_entries()
             .map_err(|e| TuiError::Vault(e.to_string()))?;
@@ -104,6 +113,7 @@ impl App {
             should_quit: false,
             status_message: None,
             show_password: false,
+            theme,
         })
     }
 
@@ -339,11 +349,11 @@ impl App {
 
 /// Run the TUI application
 pub fn run() -> TuiResult<()> {
-    run_with_vault(None)
+    run_with_vault(None, Theme::default_theme())
 }
 
-/// Run the TUI with optional vault path
-pub fn run_with_vault(vault_path: Option<&std::path::Path>) -> TuiResult<()> {
+/// Run the TUI with optional vault path and a theme
+pub fn run_with_vault(vault_path: Option<&std::path::Path>, theme: Theme) -> TuiResult<()> {
     // Load session to verify vault is unlocked
     let session_mgr = SessionManager::new().map_err(|e| TuiError::Session(e.to_string()))?;
 
@@ -372,7 +382,7 @@ pub fn run_with_vault(vault_path: Option<&std::path::Path>) -> TuiResult<()> {
         .map_err(|e| TuiError::Vault(e.to_string()))?;
 
     // Create app
-    let mut app = App::new(storage)?;
+    let mut app = App::with_theme(storage, theme)?;
 
     // Setup terminal
     enable_raw_mode()?;
@@ -416,6 +426,7 @@ fn run_app<B: ratatui::backend::Backend>(
 }
 
 fn ui(f: &mut Frame, app: &App) {
+    let theme = &app.theme;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -427,18 +438,13 @@ fn ui(f: &mut Frame, app: &App) {
 
     // Header
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "  Vaultic",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("  Vaultic", theme.header),
         Span::raw(" - Password Manager"),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(theme.border),
     );
     f.render_widget(header, chunks[0]);
 
@@ -446,7 +452,7 @@ fn ui(f: &mut Frame, app: &App) {
     match app.mode {
         Mode::List | Mode::Search => render_list(f, app, chunks[1]),
         Mode::Detail => render_detail(f, app, chunks[1]),
-        Mode::Help => render_help(f, chunks[1]),
+        Mode::Help => render_help(f, app, chunks[1]),
         Mode::ConfirmDelete => {
             render_list(f, app, chunks[1]);
             render_confirm_delete(f, app, chunks[1]);
@@ -469,12 +475,13 @@ fn ui(f: &mut Frame, app: &App) {
     };
 
     let footer = Paragraph::new(status)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(theme.muted)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, chunks[2]);
 }
 
 fn render_list(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let items: Vec<ListItem> = app
         .filtered_entries
         .iter()
@@ -488,15 +495,10 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
             };
 
             ListItem::new(Line::from(vec![
-                Span::styled(
-                    &entry.name,
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(&entry.name, theme.normal),
                 Span::raw(" "),
-                Span::styled(username, Style::default().fg(Color::Gray)),
-                Span::styled(tags, Style::default().fg(Color::DarkGray)),
+                Span::styled(username, theme.label),
+                Span::styled(tags, theme.muted),
             ]))
         })
         .collect();
@@ -512,18 +514,20 @@ fn render_list(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let list = List::new(items)
-        .block(Block::default().title(title).borders(Borders::ALL))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(theme.border),
         )
+        .highlight_style(theme.selection)
         .highlight_symbol("▶ ");
 
     f.render_stateful_widget(list, area, &mut app.list_state.clone());
 }
 
 fn render_detail(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let entry = match app.selected_entry() {
         Some(e) => e,
         None => return,
@@ -537,28 +541,23 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("Name:     ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                &entry.name,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Name:     ", theme.label),
+            Span::styled(&entry.name, theme.normal),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Username: ", Style::default().fg(Color::Gray)),
+            Span::styled("Username: ", theme.label),
             Span::raw(entry.username.as_deref().unwrap_or("-")),
         ]),
         Line::from(vec![
-            Span::styled("Password: ", Style::default().fg(Color::Gray)),
+            Span::styled("Password: ", theme.label),
             Span::styled(
                 password_display,
-                Style::default().fg(if app.show_password {
-                    Color::Yellow
+                if app.show_password {
+                    theme.accent
                 } else {
-                    Color::DarkGray
-                }),
+                    theme.muted
+                },
             ),
             Span::styled(
                 if app.show_password {
@@ -566,48 +565,45 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
                 } else {
                     " (hidden, press p to show)"
                 },
-                Style::default().fg(Color::DarkGray),
+                theme.muted,
             ),
         ]),
     ];
 
     if let Some(url) = &entry.url {
         lines.push(Line::from(vec![
-            Span::styled("URL:      ", Style::default().fg(Color::Gray)),
-            Span::styled(url, Style::default().fg(Color::Blue)),
+            Span::styled("URL:      ", theme.label),
+            Span::styled(url, theme.link),
         ]));
     }
 
     if !entry.tags.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("Tags:     ", Style::default().fg(Color::Gray)),
+            Span::styled("Tags:     ", theme.label),
             Span::raw(entry.tags.join(", ")),
         ]));
     }
 
     if let Some(folder) = &entry.folder {
         lines.push(Line::from(vec![
-            Span::styled("Folder:   ", Style::default().fg(Color::Gray)),
+            Span::styled("Folder:   ", theme.label),
             Span::raw(folder),
         ]));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("Created:  ", Style::default().fg(Color::Gray)),
+        Span::styled("Created:  ", theme.label),
         Span::raw(entry.created_at.format("%Y-%m-%d %H:%M").to_string()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Updated:  ", Style::default().fg(Color::Gray)),
+        Span::styled("Updated:  ", theme.label),
         Span::raw(entry.updated_at.format("%Y-%m-%d %H:%M").to_string()),
     ]));
 
     if let Some(notes) = &entry.notes {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Notes:",
-            Style::default().fg(Color::Gray),
-        )]));
+        lines.push(Line::from(vec![Span::styled("Notes:", theme.label)]));
         for line in notes.expose().lines() {
             lines.push(Line::from(format!("  {}", line)));
         }
@@ -616,54 +612,46 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
     let detail = Paragraph::new(lines).block(
         Block::default()
             .title(" Entry Details ")
-            .borders(Borders::ALL),
+            .borders(Borders::ALL)
+            .border_style(theme.border),
     );
     f.render_widget(detail, area);
 }
 
-fn render_help(f: &mut Frame, area: Rect) {
+fn render_help(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let help_text = vec![
-        Line::from(Span::styled(
-            "Navigation",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled("Navigation", theme.title)),
         Line::from("  j / ↓     Move down"),
         Line::from("  k / ↑     Move up"),
         Line::from("  g         Go to first entry"),
         Line::from("  G         Go to last entry"),
         Line::from("  Enter     View entry details"),
         Line::from(""),
-        Line::from(Span::styled(
-            "Actions",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled("Actions", theme.title)),
         Line::from("  /         Search entries"),
         Line::from("  y         Copy password to clipboard"),
         Line::from("  p         Toggle password visibility (in detail view)"),
         Line::from("  d         Delete entry"),
         Line::from("  r         Refresh entries"),
         Line::from(""),
-        Line::from(Span::styled(
-            "General",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
+        Line::from(Span::styled("General", theme.title)),
         Line::from("  ?         Show/hide this help"),
         Line::from("  Esc       Cancel / go back"),
         Line::from("  q         Quit"),
     ];
 
-    let help =
-        Paragraph::new(help_text).block(Block::default().title(" Help ").borders(Borders::ALL));
+    let help = Paragraph::new(help_text).block(
+        Block::default()
+            .title(" Help ")
+            .borders(Borders::ALL)
+            .border_style(theme.border),
+    );
     f.render_widget(help, area);
 }
 
 fn render_confirm_delete(f: &mut Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let entry_name = app.selected_entry().map(|e| e.name.as_str()).unwrap_or("");
 
     let popup_width = 50;
@@ -682,14 +670,12 @@ fn render_confirm_delete(f: &mut Frame, app: &App, area: Rect) {
     ];
 
     f.render_widget(Clear, popup_area);
-    let popup = Paragraph::new(text)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .title(" Confirm Delete ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red)),
-        );
+    let popup = Paragraph::new(text).style(theme.normal).block(
+        Block::default()
+            .title(" Confirm Delete ")
+            .borders(Borders::ALL)
+            .border_style(theme.error),
+    );
     f.render_widget(popup, popup_area);
 }
 

@@ -141,6 +141,9 @@ vaultic unlock
 
 # Launch TUI
 vaultic tui
+
+# Launch TUI with a different theme (default, dracula, solarized-dark, monochrome)
+vaultic tui --theme dracula
 ```
 
 ---
