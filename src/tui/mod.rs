@@ -402,12 +402,14 @@ pub fn run_with_vault(vault_path: Option<&std::path::Path>, theme: Theme) -> Tui
     result
 }
 
-fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> TuiResult<()> {
+fn run_app<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> TuiResult<()>
+where
+    B::Error: std::fmt::Display,
+{
     loop {
-        terminal.draw(|f| ui(f, app))?;
+        terminal
+            .draw(|f| ui(f, app))
+            .map_err(|e| TuiError::Terminal(e.to_string()))?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
