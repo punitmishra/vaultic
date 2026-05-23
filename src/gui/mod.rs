@@ -23,6 +23,7 @@
 //! after every event so the UI doesn't have to poll.
 
 pub mod screens;
+pub mod theme;
 pub mod worker;
 
 use std::path::PathBuf;
@@ -32,7 +33,8 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use uuid::Uuid;
 
-use crate::agent::protocol::{EntrySummary, PongView, StatusView};
+use crate::agent::protocol::{EntrySummary, PongView, StatusView, TotpView};
+use crate::gui::theme::Theme;
 use crate::gui::worker::{Command, Event};
 use crate::models::VaultEntry;
 
@@ -86,6 +88,14 @@ struct UnlockedState {
     password_revealed: bool,
     /// Transient banner from a copy action.
     toast: Option<Toast>,
+    /// Latest TOTP view for the selected entry (if it has a totp_secret).
+    /// Refreshed every `TOTP_REFRESH_INTERVAL`.
+    totp: Option<(Uuid, TotpView)>,
+    /// Last time we asked the agent for a TOTP code.
+    last_totp_request_at: Option<Instant>,
+    /// Set true when the search box should grab focus this frame (the user
+    /// pressed `/` from the list, etc.).
+    focus_search_next_frame: bool,
 }
 
 #[derive(Debug)]
@@ -96,6 +106,10 @@ struct Toast {
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 const TOAST_DURATION: Duration = Duration::from_secs(2);
+const TOTP_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+/// User-visible message accompanying a Copy action so they know the
+/// clipboard isn't going to hold their secret forever.
+pub(crate) const COPY_TOAST_SUFFIX: &str = " · clears in 30s";
 
 /// `eframe::App` implementation. Owns the channel ends to the tokio worker
 /// and a small bag of cached state.
@@ -106,6 +120,10 @@ pub struct VaulticGui {
     unlock: UnlockForm,
     unlocked: UnlockedState,
     socket_path_label: String,
+    theme: Theme,
+    /// Set true when [`VaulticGui::theme`] has changed since the last
+    /// frame. Triggers a fresh `Visuals` apply on the next paint.
+    theme_dirty: bool,
 }
 
 impl VaulticGui {
@@ -115,7 +133,9 @@ impl VaulticGui {
         cmd_tx: mpsc::Sender<Command>,
         event_rx: mpsc::Receiver<Event>,
         socket_path_label: String,
+        theme_name: &str,
     ) -> Self {
+        let theme = Theme::from_name(theme_name).unwrap_or_default();
         Self {
             cmd_tx,
             event_rx,
@@ -126,7 +146,22 @@ impl VaulticGui {
             },
             unlocked: UnlockedState::default(),
             socket_path_label,
+            theme,
+            theme_dirty: true,
         }
+    }
+
+    /// Switch to a different theme by name. No-op if the name is unknown.
+    pub(crate) fn set_theme_by_name(&mut self, name: &str) {
+        if let Some(theme) = Theme::from_name(name) {
+            self.theme = theme;
+            self.theme_dirty = true;
+        }
+    }
+
+    /// Read access for draw fns.
+    pub(crate) fn theme(&self) -> &Theme {
+        &self.theme
     }
 
     fn drain_events(&mut self) {
@@ -180,12 +215,19 @@ impl VaulticGui {
                     if Some(entry.id) == self.unlocked.selected_id {
                         self.unlocked.detail = Some(entry);
                         self.unlocked.password_revealed = false;
+                        // Drop any stale TOTP — we may have just selected
+                        // a non-TOTP entry, or the secret could be a new
+                        // one; let the timer refresh from scratch.
+                        self.unlocked.totp = None;
+                        self.unlocked.last_totp_request_at = None;
                     }
                 }
-                Event::Totp { .. } => {
-                    // Session 5 wires TOTP rendering. Ignore for now; we
-                    // never request it in this session, but keep the arm
-                    // so the channel stays well-formed.
+                Event::Totp { id, view } => {
+                    // Only keep if it matches the currently-selected entry
+                    // (otherwise the user moved on while it was in flight).
+                    if Some(id) == self.unlocked.selected_id {
+                        self.unlocked.totp = Some((id, view));
+                    }
                 }
             }
         }
@@ -226,6 +268,35 @@ impl VaulticGui {
         }
     }
 
+    /// If the selected entry has a TOTP secret, request a fresh code from
+    /// the agent every `TOTP_REFRESH_INTERVAL`. Cheap when no TOTP entry
+    /// is selected.
+    fn pump_totp(&mut self) {
+        let id = match self.unlocked.selected_id {
+            Some(id) => id,
+            None => return,
+        };
+        let needs_totp = self
+            .unlocked
+            .entries
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.has_totp)
+            .unwrap_or(false);
+        if !needs_totp {
+            return;
+        }
+        let due = match self.unlocked.last_totp_request_at {
+            Some(t) => t.elapsed() >= TOTP_REFRESH_INTERVAL,
+            None => true,
+        };
+        if !due {
+            return;
+        }
+        self.unlocked.last_totp_request_at = Some(Instant::now());
+        let _ = self.cmd_tx.send(Command::GetTotp { id });
+    }
+
     fn cmd_tx(&self) -> &mpsc::Sender<Command> {
         &self.cmd_tx
     }
@@ -233,19 +304,27 @@ impl VaulticGui {
 
 impl eframe::App for VaulticGui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.theme_dirty {
+            ctx.style_mut(|style| {
+                self.theme.apply(&mut style.visuals);
+            });
+            self.theme_dirty = false;
+        }
+
         self.drain_events();
         self.pump_search_debounce();
         self.pump_toast();
+        self.pump_totp();
 
         // Repaint cadence: enough for the timer/toast tickers and live
         // status updates without spinning.
         ctx.request_repaint_after(Duration::from_millis(500));
 
         screens::draw_header(ctx, self);
-        screens::draw_footer(ctx, &self.socket_path_label);
+        screens::draw_footer(ctx, &self.socket_path_label, &self.theme);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(8.0);
+            ui.add_space(theme::SPACE_MD);
             screens::draw_central(ui, ctx, self);
         });
     }

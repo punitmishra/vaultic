@@ -16,12 +16,16 @@ use vaultic::gui::worker;
     name = "vaultic-gui",
     version,
     about = "Desktop GUI for the Vaultic password manager",
-    long_about = "Connects to a running vaultic-agent over its Unix socket. Unlock the vault by entering the master password (KDF runs locally; the daemon receives only the derived key), then browse / fuzzy-search entries and copy passwords to the clipboard.\n\nTOTP code display + theming arrive in Session 5 of #9."
+    long_about = "Connects to a running vaultic-agent over its Unix socket. Unlock the vault by entering the master password (KDF runs locally; the daemon receives only the derived key), then browse / fuzzy-search entries, view live TOTP codes, copy with a 30s clipboard auto-clear. Four built-in themes; vim-style keyboard navigation."
 )]
 struct Cli {
     /// Override the agent socket path (defaults to the per-OS location).
     #[arg(long)]
     socket: Option<PathBuf>,
+
+    /// Color theme: default, dracula, solarized-dark, monochrome.
+    #[arg(long, default_value = "default")]
+    theme: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let socket_label = socket_path.display().to_string();
     let app_factory_socket = socket_path.clone();
+    let theme_name = cli.theme.clone();
     let runtime_for_factory = std::sync::Arc::new(runtime);
     let runtime_for_drop = runtime_for_factory.clone();
 
@@ -70,6 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cmd_tx.clone(),
                 event_rx,
                 socket_label.clone(),
+                &theme_name,
             )))
         }),
     );
