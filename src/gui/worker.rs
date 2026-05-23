@@ -40,6 +40,12 @@ pub enum Command {
     LoadEntry { id: Uuid },
     /// Send `Method::Search` with the supplied query and report the result.
     Search { query: String },
+    /// Send `Method::GetTotp` for the given id; reply via `Event::Totp`.
+    GetTotp { id: Uuid },
+    /// Spawn a 30s timer; if the system clipboard still contains
+    /// `sentinel` when it expires, replace the contents with an empty
+    /// string. Caller is responsible for calling `clipboard.set_text` first.
+    ClearClipboardIfMatches { sentinel: String },
     /// Stop the worker (graceful shutdown).
     Quit,
 }
@@ -221,6 +227,30 @@ async fn handle(
             }
             Err(e) => report_call_failure(client, event_tx, "search", e),
         },
+        Command::GetTotp { id } => match c.get_totp(id).await {
+            Ok(view) => {
+                let _ = event_tx.send(Event::Totp { id, view });
+            }
+            Err(e) => report_call_failure(client, event_tx, "get_totp", e),
+        },
+        Command::ClearClipboardIfMatches { sentinel } => {
+            // Run the timer in a detached task so the request loop stays
+            // responsive. If the clipboard still holds `sentinel` after
+            // 30 seconds, replace it with empty text. Otherwise leave it
+            // alone — the user has copied something newer.
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                        let still_ours = cb.get_text().map(|cur| cur == sentinel).unwrap_or(false);
+                        if still_ours {
+                            let _ = cb.set_text(String::new());
+                        }
+                    }
+                })
+                .await;
+            });
+        }
         Command::Quit => unreachable!(),
     }
 }
