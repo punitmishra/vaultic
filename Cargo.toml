@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "cryptography"]
 # CLI & TUI
 clap = { version = "4.5", features = ["derive", "env", "color"] }
 clap_complete = "4.5"
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.28"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 console = "0.15"
@@ -75,7 +75,7 @@ passwords = "3.1"
 
 # QR code for sharing and scanning
 qrcode = "0.14"
-rqrr = "0.9"
+rqrr = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 urlencoding = "2.1.3"
 
