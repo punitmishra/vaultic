@@ -4,7 +4,7 @@
 class Vaultic < Formula
   desc "Local-first, hardware-secured password manager with AI-powered management"
   homepage "https://github.com/punitmishra/vaultic"
-  version "2.0.1"
+  version "2.0.2"
   license "MIT"
 
   # SHA256 placeholders are substituted by the update-homebrew job in
