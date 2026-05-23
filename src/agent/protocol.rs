@@ -93,6 +93,11 @@ pub enum Method {
     /// Filtered list. Same shape as `ListSummary` but applies a fuzzy
     /// query against name/username/url/tags.
     Search { query: String },
+
+    /// Ask the daemon to shut down gracefully. Replies with success, then
+    /// emits a `Shutdown` event to all connected clients and unbinds the
+    /// socket. Same peer-cred protection as every other method.
+    Shutdown,
 }
 
 // ============ Responses ============
@@ -258,6 +263,71 @@ fn read_exact_or_eof<R: Read>(r: &mut R, buf: &mut [u8]) -> Result<ReadResult, F
     let mut filled = 0;
     while filled < buf.len() {
         match r.read(&mut buf[filled..])? {
+            0 => {
+                if filled == 0 {
+                    return Ok(ReadResult::Eof);
+                }
+                return Err(FramingError::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "partial frame: peer closed mid-message",
+                )));
+            }
+            n => filled += n,
+        }
+    }
+    Ok(ReadResult::Ok)
+}
+
+// ============ Async framing (tokio) ============
+
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+/// Async counterpart of `write_frame`. Same wire format.
+pub async fn write_frame_async<W>(w: &mut W, frame: &Frame) -> Result<(), FramingError>
+where
+    W: AsyncWrite + Unpin,
+{
+    let body = serde_json::to_vec(frame)?;
+    if body.len() > MAX_FRAME_BYTES {
+        return Err(FramingError::TooLarge { got: body.len() });
+    }
+    let len = body.len() as u32;
+    w.write_all(&len.to_le_bytes()).await?;
+    w.write_all(&body).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Async counterpart of `read_frame`. Returns `Ok(None)` on clean EOF.
+pub async fn read_frame_async<R>(r: &mut R) -> Result<Option<Frame>, FramingError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut len_buf = [0u8; 4];
+    match read_exact_or_eof_async(r, &mut len_buf).await? {
+        ReadResult::Eof => return Ok(None),
+        ReadResult::Ok => {}
+    }
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_FRAME_BYTES {
+        return Err(FramingError::TooLarge { got: len });
+    }
+    let mut body = vec![0u8; len];
+    r.read_exact(&mut body).await?;
+    if std::str::from_utf8(&body).is_err() {
+        return Err(FramingError::InvalidUtf8);
+    }
+    let frame: Frame = serde_json::from_slice(&body)?;
+    Ok(Some(frame))
+}
+
+async fn read_exact_or_eof_async<R>(r: &mut R, buf: &mut [u8]) -> Result<ReadResult, FramingError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut filled = 0;
+    while filled < buf.len() {
+        match r.read(&mut buf[filled..]).await? {
             0 => {
                 if filled == 0 {
                     return Ok(ReadResult::Eof);
@@ -454,5 +524,45 @@ mod tests {
             let v = serde_json::to_value(code).unwrap();
             assert_eq!(v.as_str(), Some(expected), "code {:?}", code);
         }
+    }
+
+    #[test]
+    fn json_shape_shutdown_method() {
+        let frame = make_request(Method::Shutdown);
+        let json = serde_json::to_value(&frame).unwrap();
+        assert_eq!(json["method"], "shutdown");
+    }
+
+    #[tokio::test]
+    async fn async_frame_roundtrip_request() {
+        let frame = make_request(Method::Status);
+        let mut buf = Vec::new();
+        write_frame_async(&mut buf, &frame).await.unwrap();
+
+        let mut cur = std::io::Cursor::new(buf);
+        let read = read_frame_async(&mut cur).await.unwrap().unwrap();
+        match read {
+            Frame::Request(Request {
+                method: Method::Status,
+                ..
+            }) => {}
+            other => panic!("expected status, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn async_clean_eof_returns_none() {
+        let mut empty = std::io::Cursor::new(Vec::<u8>::new());
+        let read = read_frame_async(&mut empty).await.unwrap();
+        assert!(read.is_none());
+    }
+
+    #[tokio::test]
+    async fn async_oversized_rejected() {
+        let too_big = (MAX_FRAME_BYTES + 1) as u32;
+        let bytes = too_big.to_le_bytes().to_vec();
+        let mut cur = std::io::Cursor::new(bytes);
+        let result = read_frame_async(&mut cur).await;
+        assert!(matches!(result, Err(FramingError::TooLarge { .. })));
     }
 }

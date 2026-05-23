@@ -10,8 +10,12 @@
 
 pub mod paths;
 pub mod protocol;
+pub mod server;
+pub mod state;
 
 pub use protocol::{
     AgentError, ErrorCode, Frame, FramingError, Method, Request, Response, ResponseBody,
     PROTOCOL_VERSION,
 };
+pub use server::{serve, ServerConfig, ServerError};
+pub use state::{AgentState, StateError};
