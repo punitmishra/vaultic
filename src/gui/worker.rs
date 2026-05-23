@@ -15,17 +15,31 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use eframe::egui;
+use uuid::Uuid;
 
 use crate::agent::client::{AgentClient, ClientError};
-use crate::agent::protocol::{PongView, StatusView};
+use crate::agent::keys;
+use crate::agent::protocol::{EntrySummary, PongView, StatusView, TotpView};
+use crate::models::VaultEntry;
 
 /// Things the GUI asks the worker to do.
 #[derive(Debug)]
 pub enum Command {
     /// Re-issue ping + status. Sent on a 5s timer and on user clicks.
     RefreshStatus,
+    /// Run KDF locally, then send `Method::Unlock` to the agent.
+    Unlock {
+        vault_path: PathBuf,
+        password: String,
+    },
     /// Send `Method::Lock`.
     Lock,
+    /// Send `Method::ListSummary` and report the result.
+    LoadEntries,
+    /// Send `Method::GetEntry` for the given id.
+    LoadEntry { id: Uuid },
+    /// Send `Method::Search` with the supplied query and report the result.
+    Search { query: String },
     /// Stop the worker (graceful shutdown).
     Quit,
 }
@@ -37,6 +51,17 @@ pub enum Event {
     Pong { pong: PongView, status: StatusView },
     /// Connect or call failed. The reason is suitable for inline display.
     Offline { reason: String },
+    /// Unlock attempt finished. Either succeeded or returned an error
+    /// message suitable for inline display in the unlock form.
+    UnlockResult(Result<(), String>),
+    /// Result of `Method::ListSummary`.
+    Entries(Vec<EntrySummary>),
+    /// Result of `Method::Search`.
+    SearchResults(Vec<EntrySummary>),
+    /// Result of `Method::GetEntry`.
+    Entry(Box<VaultEntry>),
+    /// Result of `Method::GetTotp`.
+    Totp { id: Uuid, view: TotpView },
 }
 
 /// Spawn the worker on the supplied tokio runtime. Returns immediately.
@@ -75,18 +100,16 @@ async fn run(
     let timer_handle = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
-            // We don't have shared access to `client` from here, so we just
-            // emit a synthetic refresh by re-connecting per-tick. Cheap on
-            // a Unix socket; keeps the state machine simple.
+            // Use a separate short-lived client so we don't fight the main
+            // request stream when both happen to fire at once.
             let mut local: Option<AgentClient> = None;
             let _ = handle(&timer_socket, &mut local, &timer_tx, Command::RefreshStatus).await;
             timer_ctx.request_repaint();
         }
     });
 
-    // Synchronous mpsc means we can't `recv()` directly inside an async fn
-    // without blocking the executor. Spawn-blocking trick: a small task
-    // converts sync recv -> async tokio mpsc.
+    // std mpsc isn't async-friendly; spawn_blocking pumps it into a tokio
+    // mpsc that this task can `recv()` cleanly.
     let (a_cmd_tx, mut a_cmd_rx) = tokio::sync::mpsc::channel::<Command>(8);
     let pump = tokio::task::spawn_blocking(move || {
         while let Ok(cmd) = cmd_rx.recv() {
@@ -123,9 +146,15 @@ async fn handle(
         match AgentClient::connect(socket_path).await {
             Ok(c) => *client = Some(c),
             Err(e) => {
-                let _ = event_tx.send(Event::Offline {
-                    reason: format!("connect: {}", e),
-                });
+                // Surface a reasonable per-command failure event. For
+                // Unlock specifically we want the form to learn that the
+                // attempt didn't even reach the agent.
+                let reason = format!("connect: {}", e);
+                if matches!(cmd, Command::Unlock { .. }) {
+                    let _ = event_tx.send(Event::UnlockResult(Err(reason)));
+                } else {
+                    let _ = event_tx.send(Event::Offline { reason });
+                }
                 return;
             }
         }
@@ -138,10 +167,35 @@ async fn handle(
             Ok((pong, status)) => {
                 let _ = event_tx.send(Event::Pong { pong, status });
             }
-            Err(e) => {
-                report_call_failure(client, event_tx, "ping/status", e);
-            }
+            Err(e) => report_call_failure(client, event_tx, "ping/status", e),
         },
+        Command::Unlock {
+            vault_path,
+            mut password,
+        } => {
+            let result = unlock_flow(c, &vault_path, &password).await;
+            // Zero the password copy in this stack frame as soon as we're
+            // done with it. The original String in Command was already
+            // moved here.
+            password.replace_range(.., "");
+            match result {
+                Ok(()) => {
+                    let _ = event_tx.send(Event::UnlockResult(Ok(())));
+                    // Refresh status so the UI sees the unlocked state
+                    // without a 5s wait.
+                    if let Ok((pong, status)) = refresh_status(c).await {
+                        let _ = event_tx.send(Event::Pong { pong, status });
+                    }
+                    // And populate the entries list immediately.
+                    if let Ok(entries) = c.list_summary().await {
+                        let _ = event_tx.send(Event::Entries(entries));
+                    }
+                }
+                Err(reason) => {
+                    let _ = event_tx.send(Event::UnlockResult(Err(reason)));
+                }
+            }
+        }
         Command::Lock => {
             if let Err(e) = c.lock().await {
                 report_call_failure(client, event_tx, "lock", e);
@@ -149,7 +203,45 @@ async fn handle(
                 let _ = event_tx.send(Event::Pong { pong, status });
             }
         }
+        Command::LoadEntries => match c.list_summary().await {
+            Ok(entries) => {
+                let _ = event_tx.send(Event::Entries(entries));
+            }
+            Err(e) => report_call_failure(client, event_tx, "list", e),
+        },
+        Command::LoadEntry { id } => match c.get_entry(id).await {
+            Ok(entry) => {
+                let _ = event_tx.send(Event::Entry(Box::new(entry)));
+            }
+            Err(e) => report_call_failure(client, event_tx, "get_entry", e),
+        },
+        Command::Search { query } => match c.search(query).await {
+            Ok(results) => {
+                let _ = event_tx.send(Event::SearchResults(results));
+            }
+            Err(e) => report_call_failure(client, event_tx, "search", e),
+        },
         Command::Quit => unreachable!(),
+    }
+}
+
+/// Run KDF + send `Method::Unlock`. Maps every failure into a string suitable
+/// for inline display in the unlock form, with the most useful prefix
+/// (kdf / agent / connect / etc.) in front.
+async fn unlock_flow(
+    client: &mut AgentClient,
+    vault_path: &std::path::Path,
+    password: &str,
+) -> Result<(), String> {
+    let derived = match keys::derive_for_unlock(vault_path, password) {
+        Ok(d) => d,
+        Err(e) => return Err(format!("kdf: {}", e)),
+    };
+    let hex = derived.into_hex();
+    match client.unlock(vault_path.display().to_string(), hex).await {
+        Ok(()) => Ok(()),
+        Err(ClientError::Agent(ae)) => Err(ae.message),
+        Err(other) => Err(format!("agent: {}", other)),
     }
 }
 
