@@ -16,7 +16,7 @@ use vaultic::gui::worker;
     name = "vaultic-gui",
     version,
     about = "Desktop GUI for the Vaultic password manager",
-    long_about = "Connects to a running vaultic-agent over its Unix socket and shows vault state.\n\nSession 3 of #9 ships the connection-status shell. Unlock + entry list + TOTP arrive in follow-up sessions."
+    long_about = "Connects to a running vaultic-agent over its Unix socket. Unlock the vault by entering the master password (KDF runs locally; the daemon receives only the derived key), then browse / fuzzy-search entries and copy passwords to the clipboard.\n\nTOTP code display + theming arrive in Session 5 of #9."
 )]
 struct Cli {
     /// Override the agent socket path (defaults to the per-OS location).
