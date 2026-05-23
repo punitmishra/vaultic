@@ -323,6 +323,11 @@ impl VaultStorage {
     pub fn list_entries(&self) -> StorageResult<Vec<VaultEntry>> {
         let tree = self.get_tree(trees::ENTRIES)?;
         let cipher = self.get_cipher()?;
+        // Sized to exactly tree.len() so the Vec never reallocates as we
+        // push decrypted entries. sled::Tree::len iterates keys (O(n)) but
+        // doesn't decrypt; the saving from skipping doubling-reallocation
+        // of large VaultEntry values dominates that cost on real vaults.
+        // Verified via benches/vault_ops.rs.
         let mut entries = Vec::with_capacity(tree.len());
 
         for result in tree.iter() {
