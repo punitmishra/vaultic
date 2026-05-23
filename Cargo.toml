@@ -57,7 +57,7 @@ tokio = { version = "1.42", features = ["full"] }
 
 # AI Integration (local inference + optional API)
 # Using HTTP client for flexibility - can integrate llama.cpp or ollama
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
