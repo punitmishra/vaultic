@@ -102,6 +102,10 @@ gpg = ["dep:sequoia-openpgp"]
 name = "vaultic"
 path = "src/main.rs"
 
+[[bin]]
+name = "vaultic-agent"
+path = "src/bin/vaultic_agent.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1

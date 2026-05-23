@@ -44,6 +44,7 @@
 #![allow(dead_code)]
 #![warn(clippy::all)]
 
+pub mod agent;
 pub mod ai;
 pub mod cli;
 pub mod crypto;
