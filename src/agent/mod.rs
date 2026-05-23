@@ -8,11 +8,13 @@
 //!
 //! The protocol is documented in detail in `docs/AGENT_PROTOCOL.md`.
 
+pub mod client;
 pub mod paths;
 pub mod protocol;
 pub mod server;
 pub mod state;
 
+pub use client::{AgentClient, ClientError};
 pub use protocol::{
     AgentError, ErrorCode, Frame, FramingError, Method, Request, Response, ResponseBody,
     PROTOCOL_VERSION,
