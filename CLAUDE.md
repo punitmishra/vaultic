@@ -14,23 +14,24 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: v2.0 Multi-Method Unlock Complete
+## Current Status: v2.0.1 (themes, perf, polish)
 
-### Checkpoint: 2026-02-08
+### Checkpoint: 2026-05-23
 
 **Build Status**: COMPILING AND RUNNING
-**Tests**: 291 passing (122 bin + 120 lib + 44 integration + 5 doctests)
+**Tests**: 303 passing (128 bin + 126 lib + 44 integration + 5 doctests)
 **Core Workflow**: FULLY FUNCTIONAL
-**TUI**: FULLY IMPLEMENTED
-**CI/CD**: GitHub Actions configured and passing
-**Documentation**: Comprehensive with demos
+**TUI**: FULLY IMPLEMENTED + 4 built-in themes (default/dracula/solarized-dark/monochrome)
+**Benchmarks**: `cargo bench --bench vault_ops` covers list/search/get/add/unlock against 10k entries
+**CI/CD**: GitHub Actions configured; currently billing-locked (issue #8)
+**Documentation**: CHANGELOG.md, slim ROADMAP.md, comprehensive CLAUDE.md
 **GitHub**: https://github.com/punitmishra/vaultic
-**v2.0 Progress**: All 5 Phases Complete
+**Active issues**: #6 deps hardening, #7 v2.0.1 release polish, #8 CI billing, #9 beyond-CLI
 
 ```bash
 # Verify everything works
 cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (291 pass)
+cargo test                   # Run all tests (303 pass)
 ./target/release/vaultic --help  # Show all commands
 
 # Key commands
