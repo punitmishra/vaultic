@@ -13,6 +13,21 @@ A lightweight, security-focused password manager written in Rust with hardware a
  Local-first | Hardware Auth | AI-Powered | Zero Trust
 ```
 
+## Three binaries
+
+Vaultic 2.1 ships three programs that share one library and one
+on-disk vault format:
+
+| Binary | What it does |
+|---|---|
+| `vaultic` | The CLI + TUI. Original surface — init, unlock, add, list, search, import/export, recovery key, sharing, TOTP, and a full-screen ratatui mode (`vaultic tui`). |
+| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves clients (the GUI today; CLI / browser-extension later) over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
+| `vaultic-gui` | An [eframe](https://github.com/emilk/egui)/egui desktop app. Talks to `vaultic-agent`. Unlock screen, entry list with fuzzy search, detail view, live TOTP codes, four built-in themes, vim-style keyboard nav, 30-second clipboard auto-clear. Runs Argon2id locally so the password never leaves the GUI process. |
+
+Wire format and threat model for the agent ↔ client conversation are
+documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). The
+overall component layout lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Features
 
 ### Security
@@ -26,34 +41,60 @@ A lightweight, security-focused password manager written in Rust with hardware a
 
 ### What's Working
 
-| Feature | Status |
-|---------|--------|
-| Vault init/unlock/lock | ✅ Working |
-| Multi-method unlock (password, recovery key) | ✅ Working |
-| BIP39 recovery keys with QR display | ✅ Working |
-| Session management (15-min auto-expiry) | ✅ Working |
-| Add/List/Get/Edit/Delete/Search entries | ✅ Working |
-| Password generation with entropy analysis | ✅ Working |
-| Tag/folder filtering | ✅ Working |
-| Import (Bitwarden, LastPass, 1Password) | ✅ Working |
-| Export (JSON, CSV, Encrypted) | ✅ Working |
-| Interactive TUI mode (ratatui) | ✅ Working |
-| Shell completions (bash/zsh/fish/powershell) | ✅ Working |
-| Shell integration (exec, shell-init) | ✅ Working |
-| AI analysis (Ollama integration) | ✅ Working |
-| AI auto-tagging | ✅ Working |
-| HIBP breach checking | ✅ Working |
-| TOTP/2FA support | ✅ Working |
-| TOTP QR code scanning (PNG/JPEG) | ✅ Working |
-| Identity management & secure sharing | ✅ Working |
-| X25519 key exchange | ✅ Working |
-| QR code generation & scanning | ✅ Working |
-| Simple web client | ✅ Working |
-| Password history (tracking + restore) | ✅ Working |
-| Batch operations (tag, delete, move) | ✅ Working |
-| Git credential helper | ✅ Working |
-| Health audit with scoring | ✅ Working |
-| FIDO2/YubiKey | 🔧 Structure ready (needs hardware) |
+#### Vault & crypto
+- Vault init/unlock/lock with XChaCha20-Poly1305 + Argon2id
+- Multi-method unlock (password, BIP39 recovery keys)
+- BIP39 recovery keys with QR display
+- Session management (15-min auto-expiry)
+- Identity management & secure sharing (X25519 key exchange)
+
+#### CLI / TUI (`vaultic`)
+- Add / list / get / edit / delete / search entries (fuzzy search)
+- Password generation with entropy analysis
+- Tag / folder filtering, favorites, password history
+- Import: Bitwarden, LastPass, 1Password
+- Export: JSON, CSV, encrypted backup
+- Full-screen TUI mode (`vaultic tui`) with vim-style keys + 4 themes
+- Shell completions: bash / zsh / fish / powershell
+- Shell integration (`exec`, `shell-init`)
+- TOTP/2FA: scan QR codes (PNG/JPEG), display codes with countdown
+- AI analysis (Ollama) + auto-tagging
+- HIBP breach checking
+- Health audit with scoring
+- Batch operations (tag, delete, move, favorite)
+- Git credential helper
+
+#### Daemon (`vaultic-agent`) — new in v2.1
+- Unix-socket server with peer-credential auth (same UID only)
+- 9 protocol methods: ping, status, unlock, lock, list_summary,
+  get_entry, get_totp, search, shutdown
+- Holds unlocked vault key in memory until 15-min inactivity timeout
+  or explicit lock / shutdown
+- Detects stale sockets from crashed daemons and recreates them
+- Graceful SIGINT shutdown unlinks the socket
+
+#### GUI (`vaultic-gui`) — new in v2.1
+- Connects to `vaultic-agent` over its Unix socket
+- Unlock dialog runs Argon2id KDF locally; daemon never sees the
+  password
+- Entry list with type-ahead fuzzy search
+- Detail pane with name, username, password (masked + reveal),
+  URL, tags, folder, notes
+- Live TOTP code with 1-second refresh + countdown progress bar
+- Copy-to-clipboard with **30-second auto-clear** (sentinel-matched
+  so your later clipboard contents aren't trampled)
+- Four themes shared by name with the TUI: `default`, `dracula`,
+  `solarized-dark`, `monochrome`. Hot-swappable.
+- Vim-style keyboard nav: `j` / `k` / arrows / `/` / `Esc`
+
+#### Pending / experimental
+- **FIDO2 / YubiKey** — code structure in place (`--features fido2`),
+  needs real hardware to test the unlock flow
+- **GPG support** — code structure in place (`--features gpg`),
+  pinned to `sequoia-openpgp 1.x`. The crate has a known advisory
+  ([RUSTSEC-2025-0136](https://rustsec.org/advisories/RUSTSEC-2025-0136))
+  in 1.x; bumping to 2.x is non-trivial API work. Default builds
+  don't include this feature.
 
 ---
 
@@ -135,6 +176,37 @@ vaultic health
 # Lock when done
 vaultic lock
 ```
+
+### Run the daemon + GUI
+
+```bash
+# Build everything (three binaries)
+cargo build --release
+
+# Start the agent in one terminal (foreground; SIGINT to stop)
+./target/release/vaultic-agent start
+
+# Launch the GUI from another terminal — pick a theme
+./target/release/vaultic-gui --theme dracula
+
+# Inside the GUI:
+#  1. Vault path defaults to ~/.vaultic; adjust if needed
+#  2. Type your master password, hit Enter
+#  3. Browse + fuzzy-search entries
+#  4. Live TOTP codes appear in the detail pane for entries that have them
+#  5. Copy auto-clears the clipboard after 30 seconds
+
+# In a third terminal you can probe the daemon
+./target/release/vaultic-agent status
+
+# Stop the daemon when done
+./target/release/vaultic-agent stop
+```
+
+The agent and GUI use the existing on-disk vault — same files the CLI
+reads. They don't currently share unlock state with `vaultic unlock`
+(CLI uses session files, daemon uses in-memory state); unlocking via
+the GUI is independent of unlocking via the CLI.
 
 ---
 
@@ -426,41 +498,29 @@ vaultic tui
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLI Layer                            │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │ Commands│ │  Tables │ │Progress │ │  Colors │           │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘           │
-└───────┼──────────┼──────────┼──────────┼───────────────────┘
-        │          │          │          │
-┌───────┴──────────┴──────────┴──────────┴───────────────────┐
-│                     Core Services                           │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │ Session │ │ Storage │ │ Crypto  │ │   AI    │           │
-│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘           │
-└───────┼──────────┼──────────┼──────────┼───────────────────┘
-        │          │          │          │
-┌───────┴──────────┴──────────┴──────────┴───────────────────┐
-│                   Data Layer                                │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │  Sled   │ │  Files  │ │  KDF    │ │ Keyring │           │
-│  │   DB    │ │(session)│ │ params  │ │  (v2)   │           │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
-└─────────────────────────────────────────────────────────────┘
-```
+Vaultic ships three binaries — `vaultic` (CLI/TUI), `vaultic-agent`
+(Unix-socket daemon), and `vaultic-gui` (eframe app) — that all
+share one library and one on-disk vault format.
+
+For a contributor-oriented overview of how the pieces fit together
+(component diagram, threading model, where to find each module,
+known seams), see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+For the daemon's wire format and threat model, see
+[`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md).
 
 ### File Structure
 
 ```
 ~/.vaultic/
-├── db                  # Sled database (encrypted entries)
-├── conf                # Sled configuration
-├── blobs/              # Sled blob storage
-├── kdf_params.json     # Salt + KDF parameters
-├── keyring.json        # v2: Encrypted unlock method keys
-└── .session            # Encrypted session (temporary)
+├── db/                 # sled database (encrypted entries)
+├── kdf_params.json     # Argon2id parameters + salt
+├── keyring.json        # v2 multi-method unlock (encrypted wrappings)
+└── session/            # CLI-only: encrypted session files
 ```
+
+The agent keeps its unlocked state purely in memory; it doesn't
+read or write `session/`.
 
 ---
 
@@ -507,31 +567,27 @@ cargo clippy
 
 ---
 
-## Test Results (v2.0.0)
+## Test Results (v2.1.0)
 
 ```
-cargo test: 291 tests passing
-  - 122 bin tests (CLI commands and parsing)
-  - 120 lib tests (crypto, storage, models, migration, recovery, ai, totp)
-  - 44 integration tests (end-to-end workflows)
-  - 5 doctests (code examples)
+cargo test --release: 359 tests passing
+  - lib: 126 unit tests (crypto, storage, models, migration, recovery,
+    ai, totp, agent protocol/state/server/client/keys, gui theme)
+  - bin: 169 unit tests (CLI commands + lib re-runs)
+  - integration: 15 agent integration tests (real Unix-socket round
+    trips against fixture vaults)
+  - integration: 44 storage / model integration tests
+  - doctests: 5 code examples in module docs
 
-cargo build --release: Success
-cargo clippy: No warnings
-cargo fmt --check: Formatted
+cargo build --release: Success (vaultic, vaultic-agent, vaultic-gui)
+cargo clippy --release --all-features -- -D warnings: clean
+cargo fmt --check: clean
+cargo bench --bench vault_ops: list_entries 16 ms / search 20 ms on
+  10k entries
 
-All features tested and working:
-✓ init, unlock, lock, status
-✓ add, list, get, edit, delete, search
-✓ generate, health, history
-✓ totp (scan QR codes, show codes, watch)
-✓ identity (show, export, add, list, remove)
-✓ share (with expiration, one-time)
-✓ recovery (generate, verify, unlock)
-✓ exec, shell-init
-✓ suggest (auto-tag, analyze, check-breaches)
-✓ batch, credential
-✓ tui, import, export, completions
+cargo audit:
+  1 vulnerability (sequoia-openpgp; --features gpg only)
+  4 unmaintained warnings (1 direct: bincode; 3 transitive)
 ```
 
 ---
