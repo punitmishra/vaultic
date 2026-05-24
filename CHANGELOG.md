@@ -9,9 +9,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See [open issues](https://github.com/punitmishra/vaultic/issues) for what's
 in flight, especially the `bincode 1 → 2` migration in
-[#6](https://github.com/punitmishra/vaultic/issues/6) Phase B and the
-beyond-CLI direction discussion in
-[#9](https://github.com/punitmishra/vaultic/issues/9).
+[#6](https://github.com/punitmishra/vaultic/issues/6) Phase B.
+
+## [2.1.0] - 2026-05-23
+
+Vaultic now ships **three binaries** instead of one. Closes the
+beyond-CLI arc tracked in [#9](https://github.com/punitmishra/vaultic/issues/9).
+
+### Added — `vaultic-agent` (new binary)
+
+Long-running Unix-socket daemon that holds an unlocked vault key in
+memory and serves clients (the new GUI today; CLI/browser-extension
+later). Same model as `ssh-agent` / `gpg-agent`.
+
+- **Wire protocol**: 4-byte LE length-prefixed JSON, 1 MiB cap.
+  Documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md).
+- **Methods**: `ping`, `status`, `unlock`, `lock`, `list_summary`,
+  `get_entry`, `get_totp`, `search`, `shutdown`. Each returns a typed
+  `result` or a stable `error` code.
+- **Auth**: peer-credential check on accept (`SO_PEERCRED` on Linux,
+  `getpeereid()` on macOS). Same UID only.
+- **Lifecycle**: `vaultic-agent start` (foreground) /
+  `vaultic-agent stop` / `vaultic-agent status`. Stale sockets from
+  crashed daemons are detected (`ECONNREFUSED`) and recreated. SIGINT
+  triggers graceful shutdown that unlinks the socket.
+- **Inactivity timeout**: 15 minutes (mirrors the CLI session
+  timeout). Auto-locks and emits a `SessionExpired` event to all
+  connected clients.
+
+### Added — `vaultic-gui` (new binary)
+
+eframe / egui desktop app. Connects to `vaultic-agent`. Single
+window, no background process of its own.
+
+- **Unlock flow**: vault path + password input. Argon2id KDF runs
+  **locally in the GUI**; the daemon never sees the raw password
+  (Option B from the protocol's threat model). Wrong-password
+  attempts surface as inline form errors (`bad_key`) — they don't
+  blank the screen.
+- **Entry list**: scrollable, with type-ahead fuzzy search
+  (150 ms debounce). Entries with TOTP secrets carry a small "TOTP"
+  tag in the accent color.
+- **Detail pane**: name, username, password (masked + reveal toggle),
+  URL, tags, folder, notes. Copy buttons for username and password.
+- **Live TOTP**: when a TOTP entry is selected, the GUI polls
+  `Method::GetTotp` every second. Displays the 6-digit code at 18 pt,
+  a "{n}s left" label, and a progress bar for the current 30 s
+  window. Copy button puts the code on the clipboard.
+- **Clipboard auto-clear**: every Copy schedules a 30-second timer.
+  On expiry the worker overwrites the clipboard with empty string
+  **only if** it still contains the value we copied — so the user's
+  later clipboard contents aren't trampled.
+- **Themes**: four built-in themes shared by name with the TUI:
+  `default`, `dracula`, `solarized-dark`, `monochrome`. Theme picker
+  in the header; `--theme <name>` on the CLI; hot-swappable.
+- **Keyboard nav**: `j` / `k` / arrow keys move selection (wraps),
+  `/` focuses the search box, `Esc` clears the search. Behaves only
+  when no text field has focus.
+
+### Added — reusable `AgentClient` library
+
+`src/agent/client.rs` ships a thin async wrapper over the agent's
+Unix socket with one typed method per protocol method. Reusable by
+the GUI today; available for any future client (CLI-via-agent,
+browser-extension host, integration tests).
+
+`src/agent/keys.rs` exposes `derive_for_unlock(vault_path, password)`
+— the canonical client-side KDF helper. Returns a `DerivedKeyHex`
+wrapped in `Zeroize` with no `Debug` impl (printing it would leak
+the key).
+
+### Added — TUI/GUI parity
+
+The `Theme` struct lives in both `src/tui/theme.rs` (ratatui) and
+`src/gui/theme.rs` (egui). Different style systems, but the four
+named palettes are tuned to coherent looks across CLI and GUI.
+
+### Internal
+
+- New `src/bin/vaultic_agent.rs` and `src/bin/vaultic_gui.rs`
+  binaries declared in `Cargo.toml`.
+- New `eframe = 0.33` dependency (default features stripped to
+  `default_fonts/glow/wayland/x11`).
+- Test count: **303 → 359** (+56 over the v2.0.x line):
+  - 5 protocol unit tests (framing roundtrip, JSON shape lock-down,
+    error code stability)
+  - 6 path resolution tests
+  - 13 state.rs / server.rs / client.rs unit tests
+  - 15 daemon integration tests through real Unix sockets
+  - 3 KDF helper tests
+  - 5 GUI theme tests
+  - 9 misc
+
+### Sequenced PRs
+
+- [#14](https://github.com/punitmishra/vaultic/pull/14) Session 1: protocol + skeleton
+- [#15](https://github.com/punitmishra/vaultic/pull/15) Session 2: daemon MVP
+- [#16](https://github.com/punitmishra/vaultic/pull/16) Session 3: GUI shell
+- [#17](https://github.com/punitmishra/vaultic/pull/17) Session 4: functional GUI (unlock + list + detail)
+- [#18](https://github.com/punitmishra/vaultic/pull/18) Session 5: TOTP + theme + keyboard nav + clipboard auto-clear
+
+### Known limitations
+
+- The CLI's `vaultic unlock` (session-file model) and the daemon
+  (in-memory key model) are **not bridged**. Unlocking via CLI
+  doesn't make the GUI see "unlocked". Bridging is a separate
+  workstream.
+- Daemon is **Unix only**: Linux + macOS. Windows is deferred
+  (named-pipe transport, peer-cred equivalent).
+- No daemonization or `launchd` / `systemd` integration; users
+  start the agent manually.
+- The master key in the daemon's address space is **not mlock'd**
+  (could swap to disk under memory pressure). Possible follow-up.
 
 ## [2.0.2] - 2026-05-23
 
@@ -108,7 +217,8 @@ Initial release. Core functionality: vault init/unlock/lock, encrypted
 storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
-[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/punitmishra/vaultic/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/punitmishra/vaultic/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/punitmishra/vaultic/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/punitmishra/vaultic/compare/v0.1.0...v2.0.0

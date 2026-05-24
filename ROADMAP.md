@@ -6,19 +6,30 @@ This file is a high-level pointer to where the project is going. For
 
 ## Current state
 
-Vaultic 2.0.x is feature-complete for the original CLI/TUI vision:
-multi-method unlock, BIP39 recovery, secure sharing, TUI mode with
-themes, TOTP scan/show, shell integration, import/export, and a
-~10k-entry vault performs at ~16ms list / ~20ms search.
+Vaultic 2.1.0 ships **three binaries**: the original CLI/TUI
+(`vaultic`), a long-running Unix-socket daemon (`vaultic-agent`),
+and an egui desktop app (`vaultic-gui`). All three share the
+underlying library, with the daemon serving the GUI over a typed
+JSON-over-Unix-socket protocol (see
+[`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md)).
+
+A ~10k-entry vault performs at ~16 ms list / ~20 ms search. `cargo
+audit` reports 1 vulnerability (`sequoia-openpgp`, only built with
+`--features gpg`) and 4 unmaintained warnings (mostly transitive).
 
 ## Active tracks
 
 | Track | Issue | Summary |
 |---|---|---|
-| Dependency hardening (security advisories, `bincode 1 → 2`) | [#6](https://github.com/punitmishra/vaultic/issues/6) | Working through 8 vulns + 8 unmaintained warnings from `cargo audit`. Phase A (rand/reqwest/ratatui bumps) is the next concrete PR. |
-| Release pipeline + Homebrew formula bug | [#7](https://github.com/punitmishra/vaultic/issues/7) | Closes with v2.0.1 ship. |
-| GitHub Actions billing lock | [#8](https://github.com/punitmishra/vaultic/issues/8) | Tracker. CI/release pipelines blocked until resolved. |
-| Beyond CLI: GUI / daemon / browser ext | [#9](https://github.com/punitmishra/vaultic/issues/9) | Discussion issue. Headline target is a native GUI, with `vaultic-agent` (Unix-socket daemon) underneath as the architectural multiplier. |
+| Dependency hardening — Phase B (`bincode 1 → 2`) | [#6](https://github.com/punitmishra/vaultic/issues/6) | The remaining unmaintained-direct-dep. Touches every encrypted vault entry; needs a vault format migration design. Independent of GUI work. |
+| GitHub Actions billing lock | [#8](https://github.com/punitmishra/vaultic/issues/8) | Tracker. CI/release pipelines blocked until resolved. Tags exist but artifacts can't auto-build. |
+
+## Recently closed
+
+| Track | Issue | Closed in |
+|---|---|---|
+| Release pipeline + Homebrew formula bug | [#7](https://github.com/punitmishra/vaultic/issues/7) | v2.0.1 |
+| Beyond CLI: GUI / daemon / browser ext | [#9](https://github.com/punitmishra/vaultic/issues/9) | v2.1.0 — five-PR arc (#14–#18) |
 
 ## Planning principles
 

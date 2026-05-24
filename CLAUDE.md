@@ -14,25 +14,43 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: v2.0.1 (themes, perf, polish)
+## Current Status: v2.1.0 (daemon + GUI + dep hardening)
 
 ### Checkpoint: 2026-05-23
 
-**Build Status**: COMPILING AND RUNNING
-**Tests**: 303 passing (128 bin + 126 lib + 44 integration + 5 doctests)
+**Build Status**: COMPILING AND RUNNING (three binaries)
+**Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app)
+**Tests**: 359 passing (lib + bin + integration + doc)
 **Core Workflow**: FULLY FUNCTIONAL
-**TUI**: FULLY IMPLEMENTED + 4 built-in themes (default/dracula/solarized-dark/monochrome)
+**TUI**: FULLY IMPLEMENTED + 4 themes (default/dracula/solarized-dark/monochrome)
+**GUI**: FULLY IMPLEMENTED — unlock + list + detail + live TOTP + 4 themes + keyboard nav
+**Daemon**: FULLY IMPLEMENTED — Unix socket, peer-cred auth, 9 protocol methods, inactivity lock
 **Benchmarks**: `cargo bench --bench vault_ops` covers list/search/get/add/unlock against 10k entries
+**Audit**: `cargo audit` reports 1 vuln (gpg-feature-only) + 4 unmaintained warnings
 **CI/CD**: GitHub Actions configured; currently billing-locked (issue #8)
-**Documentation**: CHANGELOG.md, slim ROADMAP.md, comprehensive CLAUDE.md
+**Documentation**: CHANGELOG.md, slim ROADMAP.md, AGENT_PROTOCOL.md, comprehensive CLAUDE.md
 **GitHub**: https://github.com/punitmishra/vaultic
-**Active issues**: #6 deps hardening, #7 v2.0.1 release polish, #8 CI billing, #9 beyond-CLI
+**Active issues**: #6 deps hardening (Phase B remains), #8 CI billing
 
 ```bash
 # Verify everything works
-cargo build --release        # Build optimized binary
-cargo test                   # Run all tests (303 pass)
-./target/release/vaultic --help  # Show all commands
+cargo build --release        # Builds three binaries
+cargo test --release         # 359 passing
+
+# CLI
+./target/release/vaultic --help
+
+# Daemon
+./target/release/vaultic-agent start    # Foreground; binds Unix socket
+./target/release/vaultic-agent status   # Probe running daemon
+./target/release/vaultic-agent stop     # Graceful shutdown
+
+# GUI
+./target/release/vaultic-gui                          # Default theme
+./target/release/vaultic-gui --theme dracula          # Or any of 4 named themes
+./target/release/vaultic-gui --socket /custom/path.sock
+
+# Verify everything works (CLI side)
 
 # Key commands
 ./target/release/vaultic health            # Security audit

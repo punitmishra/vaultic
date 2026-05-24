@@ -1,6 +1,6 @@
 [package]
 name = "vaultic"
-version = "2.0.2"
+version = "2.1.0"
 edition = "2021"
 authors = ["Punit"]
 description = "Local-first, hardware-secured password manager with AI-powered management"
