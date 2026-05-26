@@ -16,7 +16,7 @@ use crate::agent::client::{AgentClient, ClientError};
 use crate::agent::paths;
 use crate::agent::protocol::{EntrySummary, ErrorCode, StatusView, TotpView};
 use crate::crypto::MasterKey;
-use crate::models::VaultEntry;
+use crate::models::{SearchFilter, VaultEntry};
 
 /// Snapshot of the agent's state at one moment, suitable for `vaultic status`
 /// and for the unlock/lock flow's "should we route through the agent?"
@@ -283,6 +283,70 @@ pub(crate) fn route_get_totp_for_id_at(
             Ok(view) => Some(Ok(view)),
             Err(ClientError::Agent(ae)) if ae.code == ErrorCode::VaultLocked => None,
             Err(e) => Some(Err(format!("agent get_totp failed: {}", explain(&e)))),
+        }
+    })
+    .flatten()
+}
+
+/// Fetch a full entry by id via a running agent. Companion to
+/// [`route_list_filtered`] for flows that pick a summary locally and then
+/// need the full record (e.g. `vaultic search`). Same three-state return
+/// semantics as the other route helpers.
+pub fn route_get_entry_by_id(vault_path: &Path, id: Uuid) -> Option<Result<VaultEntry, String>> {
+    let socket = paths::agent_socket_path().ok()?;
+    route_get_entry_by_id_at(&socket, vault_path, id)
+}
+
+pub(crate) fn route_get_entry_by_id_at(
+    socket: &Path,
+    vault_path: &Path,
+    id: Uuid,
+) -> Option<Result<VaultEntry, String>> {
+    let socket = socket.to_path_buf();
+    let vault_path = vault_path.to_path_buf();
+    run_async(async move {
+        let mut client = AgentClient::connect(&socket).await.ok()?;
+        if !is_unlocked_for_vault(&mut client, &vault_path).await {
+            return None;
+        }
+        match client.get_entry(id).await {
+            Ok(entry) => Some(Ok(entry)),
+            Err(ClientError::Agent(ae)) if ae.code == ErrorCode::VaultLocked => None,
+            Err(e) => Some(Err(format!("agent get_entry failed: {}", explain(&e)))),
+        }
+    })
+    .flatten()
+}
+
+/// Read-through filtered list via a running agent. Same three-state return
+/// semantics as the other route helpers: `None` means the agent isn't
+/// routable (caller should fall back to local sled), `Some(Ok)` is the
+/// summaries, `Some(Err)` is a user-visible failure that happened after
+/// we'd already committed to the agent path.
+pub fn route_list_filtered(
+    vault_path: &Path,
+    filter: SearchFilter,
+) -> Option<Result<Vec<EntrySummary>, String>> {
+    let socket = paths::agent_socket_path().ok()?;
+    route_list_filtered_at(&socket, vault_path, filter)
+}
+
+pub(crate) fn route_list_filtered_at(
+    socket: &Path,
+    vault_path: &Path,
+    filter: SearchFilter,
+) -> Option<Result<Vec<EntrySummary>, String>> {
+    let socket = socket.to_path_buf();
+    let vault_path = vault_path.to_path_buf();
+    run_async(async move {
+        let mut client = AgentClient::connect(&socket).await.ok()?;
+        if !is_unlocked_for_vault(&mut client, &vault_path).await {
+            return None;
+        }
+        match client.list_filtered(filter).await {
+            Ok(list) => Some(Ok(list)),
+            Err(ClientError::Agent(ae)) if ae.code == ErrorCode::VaultLocked => None,
+            Err(e) => Some(Err(format!("agent list_filtered failed: {}", explain(&e)))),
         }
     })
     .flatten()
@@ -661,6 +725,114 @@ mod tests {
                 Some(Ok(view)) => assert_eq!(view.code.len(), 6),
                 other => panic!("expected Some(Ok(view)), got {:?}", other),
             }
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn route_list_filtered_at_returns_all_when_filter_empty() {
+            let h = boot().await;
+            unlock(&h.socket_path, &h.vault_path).await;
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let result =
+                run_blocking(move || route_list_filtered_at(&socket, &vault, SearchFilter::new()))
+                    .await;
+            match result {
+                Some(Ok(list)) => {
+                    assert_eq!(list.len(), 2, "expected 2 summaries, got {}", list.len());
+                    let names: Vec<&str> = list.iter().map(|s| s.name.as_str()).collect();
+                    assert!(names.contains(&"GitHub"));
+                    assert!(names.contains(&"MyAuthenticator"));
+                }
+                other => panic!("expected Some(Ok(_)), got {:?}", other),
+            }
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn route_list_filtered_at_applies_query() {
+            let h = boot().await;
+            unlock(&h.socket_path, &h.vault_path).await;
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let result = run_blocking(move || {
+                route_list_filtered_at(&socket, &vault, SearchFilter::new().with_query("octocat"))
+            })
+            .await;
+            match result {
+                Some(Ok(list)) => {
+                    assert_eq!(list.len(), 1);
+                    assert_eq!(list[0].name, "GitHub");
+                }
+                other => panic!("expected Some(Ok(_)), got {:?}", other),
+            }
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn route_list_filtered_at_returns_none_when_locked() {
+            let h = boot().await;
+            // Boot without unlocking — must be not-routable.
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let result =
+                run_blocking(move || route_list_filtered_at(&socket, &vault, SearchFilter::new()))
+                    .await;
+            assert!(result.is_none(), "expected None, got {:?}", result);
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn route_get_entry_by_id_at_returns_full_entry() {
+            let h = boot().await;
+            unlock(&h.socket_path, &h.vault_path).await;
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let id = h.sample_entry_id;
+            let result = run_blocking(move || route_get_entry_by_id_at(&socket, &vault, id)).await;
+            match result {
+                Some(Ok(entry)) => {
+                    assert_eq!(entry.id, id);
+                    assert_eq!(entry.name, "GitHub");
+                    assert_eq!(entry.username.as_deref(), Some("octocat@example.com"));
+                    assert!(entry.password.is_some());
+                }
+                other => panic!("expected Some(Ok(entry)), got {:?}", other),
+            }
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn route_get_entry_by_id_at_returns_none_when_locked() {
+            let h = boot().await;
+            // No unlock; not routable.
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let id = h.sample_entry_id;
+            let result = run_blocking(move || route_get_entry_by_id_at(&socket, &vault, id)).await;
+            assert!(result.is_none());
+            let _ = h.shutdown_tx.send(()).await;
+        }
+
+        #[tokio::test]
+        async fn entry_summary_carries_extended_fields() {
+            // Lock the wire format down: Type / Strength / Last Used columns
+            // depend on these.
+            let h = boot().await;
+            unlock(&h.socket_path, &h.vault_path).await;
+            let socket = h.socket_path.clone();
+            let vault = h.vault_path.clone();
+            let result =
+                run_blocking(move || route_list_filtered_at(&socket, &vault, SearchFilter::new()))
+                    .await;
+            let list = result.unwrap().unwrap();
+            let github = list.iter().find(|s| s.name == "GitHub").unwrap();
+            assert_eq!(github.entry_type, EntryType::Password);
+            // password_strength is never set anywhere in the codebase yet,
+            // so it round-trips as None — we just need the field to exist.
+            assert!(github.password_strength.is_none());
+            // last_accessed isn't set on add either; confirm it serializes.
+            assert!(github.last_accessed.is_none());
             let _ = h.shutdown_tx.send(()).await;
         }
     }

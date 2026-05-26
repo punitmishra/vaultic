@@ -209,10 +209,17 @@ impl AgentState {
 
     /// Fuzzy-search summaries. Resets timer.
     pub async fn search(&self, query: &str) -> StateResult<Vec<EntrySummary>> {
+        let filter = SearchFilter::new().with_query(query);
+        self.list_filtered(filter).await
+    }
+
+    /// Full-filter list. Same set of summaries that
+    /// `storage::search_entries(&filter)` would produce locally. Resets
+    /// the inactivity timer.
+    pub async fn list_filtered(&self, filter: SearchFilter) -> StateResult<Vec<EntrySummary>> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or(StateError::Locked)?;
         let storage = open.open_storage()?;
-        let filter = SearchFilter::new().with_query(query);
         let entries = storage
             .search_entries(&filter)
             .map_err(|e| StateError::VaultIo(e.to_string()))?;
@@ -251,6 +258,9 @@ fn entry_to_summary(entry: &VaultEntry) -> EntrySummary {
         favorite: entry.favorite,
         has_password: entry.password.is_some(),
         has_totp: entry.totp_secret.is_some(),
+        entry_type: entry.entry_type.clone(),
+        password_strength: entry.password_strength,
+        last_accessed: entry.last_accessed,
     }
 }
 

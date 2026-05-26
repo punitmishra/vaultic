@@ -13,9 +13,12 @@
 
 use std::io::{Read, Write};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::models::{EntryType, PasswordStrength, SearchFilter};
 
 /// Bumped whenever the wire format changes in a backwards-incompatible way.
 /// Clients send their version in `ping`; daemons that disagree refuse the
@@ -94,6 +97,15 @@ pub enum Method {
     /// query against name/username/url/tags.
     Search { query: String },
 
+    /// Full-filter list. Returns `Vec<EntrySummary>` matching every clause
+    /// of the supplied filter (query, entry_type, tags, folder,
+    /// favorites_only, needs_rotation, weak_passwords, limit, offset).
+    /// `Search { query }` covers the simple case; `ListFiltered` lets
+    /// clients request the same filtering the local CLI does, so commands
+    /// like `vaultic list --weak --folder work` can route through the
+    /// daemon without opening sled themselves.
+    ListFiltered { filter: SearchFilter },
+
     /// Ask the daemon to shut down gracefully. Replies with success, then
     /// emits a `Shutdown` event to all connected clients and unbinds the
     /// socket. Same peer-cred protection as every other method.
@@ -160,7 +172,14 @@ pub enum Event {
 
 // ============ Domain types returned in responses ============
 
-/// Reply payload for `ListSummary` / `Search`.
+/// Reply payload for `ListSummary` / `Search` / `ListFiltered`.
+///
+/// Carries every non-secret field the CLI's table renderer needs, so
+/// `vaultic list` can format identically whether it routed through the
+/// daemon or opened sled directly. `password_strength`, `entry_type` and
+/// `last_accessed` are not secrets — they're already visible in the GUI's
+/// list view — but they let the renderer show the same Type / Strength /
+/// Last Used columns the local path does.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EntrySummary {
     pub id: Uuid,
@@ -172,6 +191,9 @@ pub struct EntrySummary {
     pub favorite: bool,
     pub has_password: bool,
     pub has_totp: bool,
+    pub entry_type: EntryType,
+    pub password_strength: Option<PasswordStrength>,
+    pub last_accessed: Option<DateTime<Utc>>,
 }
 
 /// Reply payload for `GetTotp`. Caller decides how to display.
