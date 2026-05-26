@@ -1094,6 +1094,20 @@ fn copy_to_clipboard_internal(text: &str) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+/// Print one line of a TOTP watch display: `\r  CODE  [bar]  Ns  ` and flush.
+/// Used by `vaultic totp show --watch` from both the agent-routed and
+/// local-fallback paths.
+fn print_totp_line(display: &crate::totp::TotpDisplay) {
+    use std::io::Write;
+    print!(
+        "\r  {} {} {}  ",
+        display.formatted_code().bold(),
+        display.progress_bar(20),
+        format!("{}s", display.remaining).dimmed(),
+    );
+    let _ = std::io::stdout().flush();
+}
+
 /// Simple hash for password reuse detection (not cryptographic)
 fn md5_hash(input: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;
@@ -1556,49 +1570,65 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             qr,
             field,
         } => {
-            // Require unlocked vault
-            let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr
-                .load()
-                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let vault_path = default_vault_path(&cli.vault);
 
-            // Refresh session
-            let _ = session_mgr.refresh(15);
-
-            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
-            storage.unlock(&master_key)?;
-
-            // Search for the entry
-            let filter = crate::models::SearchFilter {
-                query: Some(query.clone()),
-                entry_type: None,
-                tags: vec![],
-                folder: None,
-                favorites_only: false,
-                needs_rotation: false,
-                weak_passwords: false,
-                offset: 0,
-                limit: Some(10),
-            };
-
-            let entries = storage.search_entries(&filter)?;
-
-            if entries.is_empty() {
-                Output::error(&format!("No entry found matching '{}'", query));
-                return Ok(());
-            }
-
-            // If multiple matches, let user choose
-            let entry = if entries.len() == 1 {
-                entries.into_iter().next().unwrap()
-            } else {
-                let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
-                let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+            // Try the agent first. If it's unlocked for this vault, we don't
+            // need a CLI session. Falls through to the local sled path on
+            // `None` (agent absent / locked / wrong vault).
+            let entry = match agent_bridge::route_get_entry(&vault_path, &query, |summaries| {
+                let names: Vec<String> = summaries.iter().map(|s| s.name.clone()).collect();
+                FuzzySelect::with_theme(&ColorfulTheme::default())
                     .with_prompt("Multiple matches found. Select one:")
                     .items(&names)
                     .default(0)
-                    .interact()?;
-                entries.into_iter().nth(selection).unwrap()
+                    .interact()
+                    .ok()
+            }) {
+                Some(Ok(entry)) => entry,
+                Some(Err(msg)) => {
+                    Output::error(&msg);
+                    return Ok(());
+                }
+                None => {
+                    // Local fallback: requires a CLI session.
+                    let session_mgr = crate::session::SessionManager::new()?;
+                    let (vp, master_key) = session_mgr
+                        .load()
+                        .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+                    let _ = session_mgr.refresh(15);
+
+                    let mut storage = crate::storage::VaultStorage::open(&vp)?;
+                    storage.unlock(&master_key)?;
+
+                    let filter = crate::models::SearchFilter {
+                        query: Some(query.clone()),
+                        entry_type: None,
+                        tags: vec![],
+                        folder: None,
+                        favorites_only: false,
+                        needs_rotation: false,
+                        weak_passwords: false,
+                        offset: 0,
+                        limit: Some(10),
+                    };
+                    let entries = storage.search_entries(&filter)?;
+
+                    if entries.is_empty() {
+                        Output::error(&format!("No entry found matching '{}'", query));
+                        return Ok(());
+                    }
+                    if entries.len() == 1 {
+                        entries.into_iter().next().unwrap()
+                    } else {
+                        let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                        let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                            .with_prompt("Multiple matches found. Select one:")
+                            .items(&names)
+                            .default(0)
+                            .interact()?;
+                        entries.into_iter().nth(selection).unwrap()
+                    }
+                }
             };
 
             // Handle specific field request
@@ -4222,14 +4252,88 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 TotpCommands::Show { query, copy, watch } => {
-                    // Require unlocked vault
+                    let vault_path = default_vault_path(&cli.vault);
+
+                    // Try the agent first. Returns (entry id, name, current
+                    // TotpView) so a --watch loop can refresh by id without
+                    // re-running search every tick.
+                    let routed = agent_bridge::route_get_totp(&vault_path, &query, |summaries| {
+                        let names: Vec<String> = summaries.iter().map(|s| s.name.clone()).collect();
+                        FuzzySelect::with_theme(&ColorfulTheme::default())
+                            .with_prompt("Multiple matches found. Select one:")
+                            .items(&names)
+                            .default(0)
+                            .interact()
+                            .ok()
+                    });
+
+                    match routed {
+                        Some(Ok((id, name, view))) => {
+                            let display = crate::totp::TotpDisplay {
+                                code: view.code.clone(),
+                                remaining: view.period_remaining_seconds as u64,
+                                period: view.period_total_seconds as u64,
+                            };
+                            if watch {
+                                Output::info(&format!(
+                                    "Showing TOTP codes for '{}' (Ctrl+C to stop)",
+                                    name
+                                ));
+                                // First tick uses the view we already have.
+                                print_totp_line(&display);
+                                loop {
+                                    std::thread::sleep(Duration::from_secs(1));
+                                    match agent_bridge::route_get_totp_for_id(&vault_path, id) {
+                                        Some(Ok(v)) => {
+                                            let d = crate::totp::TotpDisplay {
+                                                code: v.code,
+                                                remaining: v.period_remaining_seconds as u64,
+                                                period: v.period_total_seconds as u64,
+                                            };
+                                            print_totp_line(&d);
+                                        }
+                                        Some(Err(msg)) => {
+                                            println!();
+                                            Output::error(&msg);
+                                            return Ok(());
+                                        }
+                                        None => {
+                                            println!();
+                                            Output::warning(
+                                                "Agent locked or unreachable; stopping watch.",
+                                            );
+                                            return Ok(());
+                                        }
+                                    }
+                                }
+                            } else {
+                                println!(
+                                    "  {} {} {}",
+                                    display.formatted_code().bold(),
+                                    display.progress_bar(20),
+                                    format!("{}s remaining", display.remaining).dimmed(),
+                                );
+                                if copy {
+                                    copy_to_clipboard(&view.code, 30)?;
+                                }
+                                return Ok(());
+                            }
+                        }
+                        Some(Err(msg)) => {
+                            Output::error(&msg);
+                            return Ok(());
+                        }
+                        None => { /* fall through to local path */ }
+                    }
+
+                    // Local fallback: requires a CLI session.
                     let session_mgr = crate::session::SessionManager::new()?;
-                    let (vault_path, master_key) = session_mgr
+                    let (vp, master_key) = session_mgr
                         .load()
                         .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
                     let _ = session_mgr.refresh(15);
 
-                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    let mut storage = crate::storage::VaultStorage::open(&vp)?;
                     storage.unlock(&master_key)?;
 
                     let filter = crate::models::SearchFilter {
@@ -4274,14 +4378,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         ));
                         loop {
                             if let Ok(display) = crate::totp::TotpDisplay::from_totp(&totp) {
-                                print!(
-                                    "\r  {} {} {}  ",
-                                    display.formatted_code().bold(),
-                                    display.progress_bar(20),
-                                    format!("{}s", display.remaining).dimmed(),
-                                );
-                                use std::io::Write;
-                                std::io::stdout().flush()?;
+                                print_totp_line(&display);
                             }
                             std::thread::sleep(Duration::from_secs(1));
                         }
