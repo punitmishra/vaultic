@@ -15,7 +15,7 @@ use vaultic::models::{EntryType, KdfParams, SearchFilter, SensitiveString, Vault
 use vaultic::storage::VaultStorage;
 
 const ENTRY_COUNT: usize = 10_000;
-const SEED: u64 = 0xC0FFEE_BEEF_42_42;
+const SEED: u64 = 0xC0FF_EEBE_EF42_4242;
 
 /// Deterministic test fixture: builds a vault directory with `count` entries
 /// and returns it along with the master key used to encrypt them.
@@ -49,7 +49,7 @@ fn build_fixture(count: usize) -> Fixture {
 
     for i in 0..count {
         let entry = make_entry(i, &mut rng);
-        if i % (count / 64).max(1) == 0 && sample_ids.len() < 64 {
+        if i.is_multiple_of((count / 64).max(1)) && sample_ids.len() < 64 {
             sample_ids.push(entry.id);
             sample_names.push(entry.name.clone());
         }
@@ -98,8 +98,15 @@ fn make_entry(i: usize, rng: &mut StdRng) -> VaultEntry {
         provider.to_lowercase()
     ));
     entry.tags = pick_tags(i);
-    entry.folder = Some(if i % 3 == 0 { "personal" } else { "work" }.to_string());
-    entry.favorite = i % 50 == 0;
+    entry.folder = Some(
+        if i.is_multiple_of(3) {
+            "personal"
+        } else {
+            "work"
+        }
+        .to_string(),
+    );
+    entry.favorite = i.is_multiple_of(50);
     entry
 }
 
