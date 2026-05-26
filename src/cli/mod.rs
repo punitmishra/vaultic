@@ -7,6 +7,8 @@
 //! - Clipboard integration
 //! - QR code generation for sharing
 
+pub mod agent_bridge;
+
 use std::io::{self, IsTerminal};
 use std::time::Duration;
 
@@ -1208,6 +1210,22 @@ fn default_vault_path(cli_vault: &Option<String>) -> std::path::PathBuf {
         })
 }
 
+/// Render the agent's slice of `vaultic status`. Three lines worth of
+/// output, dropped silently when the agent isn't running.
+fn print_agent_status(agent: &agent_bridge::AgentSnapshot, vault_path: &std::path::Path) {
+    if !agent.is_running() {
+        Output::field("Agent", "Not running");
+        return;
+    }
+    if agent.is_unlocked_for(vault_path) {
+        Output::field("Agent", "Unlocked (this vault)");
+    } else if agent.is_unlocked() {
+        Output::field("Agent", "Unlocked (different vault)");
+    } else {
+        Output::field("Agent", "Running, locked");
+    }
+}
+
 /// Run the CLI command
 pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
@@ -1322,6 +1340,29 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Create session
             session_mgr.create(&vault_path, &master_key, timeout)?;
 
+            // Drop our sled handle before talking to the agent. sled's
+            // exclusive lock means the agent can't open the same vault while
+            // we hold it; without this drop, notify_agent_unlock fails with
+            // "could not acquire lock". The session file we wrote above
+            // already has everything the CLI needs for subsequent commands.
+            drop(storage);
+
+            // Best-effort: also unlock the daemon if it's running, so the
+            // GUI / browser-extension see the same state. Failure here is a
+            // diagnostic, not a hard error — the CLI itself is unlocked.
+            match agent_bridge::notify_agent_unlock(&vault_path, &master_key) {
+                Ok(true) => {
+                    Output::info("Also unlocked vaultic-agent.");
+                }
+                Ok(false) => {} // agent not running; silent
+                Err(e) => {
+                    Output::warning(&format!(
+                        "CLI unlocked, but agent did not accept unlock: {}",
+                        e
+                    ));
+                }
+            }
+
             Output::success(&format!("Vault unlocked for {} minutes", timeout));
             Ok(())
         }
@@ -1329,6 +1370,20 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Lock => {
             let session_mgr = crate::session::SessionManager::new()?;
             session_mgr.destroy()?;
+
+            // Best-effort: also lock the daemon if it's running. Same
+            // policy as unlock — diagnostic on failure, silent on
+            // not-running.
+            match agent_bridge::notify_agent_lock() {
+                Ok(true) => {
+                    Output::info("Also locked vaultic-agent.");
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    Output::warning(&format!("CLI locked, but agent did not accept lock: {}", e));
+                }
+            }
+
             Output::success("Vault locked");
             Ok(())
         }
@@ -2633,34 +2688,49 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Status => {
             let session_mgr = crate::session::SessionManager::new()?;
             let vault_path = default_vault_path(&cli.vault);
+            let agent = agent_bridge::probe();
 
             if let Some(info) = session_mgr.info() {
-                // Vault is unlocked - show full status
-                let (_, master_key) = session_mgr.load()?;
-                let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
-                storage.unlock(&master_key)?;
-
-                let metadata = storage.metadata();
-                let name = metadata.map(|m| m.name.as_str()).unwrap_or("Vault");
-                let count = metadata.map(|m| m.entry_count).unwrap_or(0);
-
                 println!();
                 Output::header("Vault Status");
-                Output::field("Name", name);
-                Output::field("Status", "Unlocked");
-                Output::field("Entries", &count.to_string());
+
+                // Reading metadata locally requires opening the sled DB,
+                // which conflicts with the agent's exclusive lock when
+                // the agent has the same vault open. Prefer the agent's
+                // already-known entry count in that case; fall back to
+                // a local read otherwise.
+                if agent.is_unlocked_for(&vault_path) {
+                    if let Some(count) = agent.status.as_ref().and_then(|s| s.entry_count) {
+                        Output::field("Entries", &count.to_string());
+                    }
+                } else {
+                    let (_, master_key) = session_mgr.load()?;
+                    let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+                    storage.unlock(&master_key)?;
+                    let metadata = storage.metadata();
+                    let name = metadata.map(|m| m.name.as_str()).unwrap_or("Vault");
+                    let count = metadata.map(|m| m.entry_count).unwrap_or(0);
+                    Output::field("Name", name);
+                    Output::field("Entries", &count.to_string());
+                }
+
+                Output::field("CLI session", "Unlocked");
                 Output::field(
                     "Session expires in",
                     &format!("{} min", info.minutes_remaining()),
                 );
+                print_agent_status(&agent, &vault_path);
                 println!();
             } else if vault_path.exists() {
-                // Vault exists but locked
+                // Vault exists but CLI session locked
                 println!();
                 Output::header("Vault Status");
                 Output::field("Path", &vault_path.to_string_lossy());
-                Output::field("Status", "Locked");
-                Output::info("Run 'vaultic unlock' to access the vault");
+                Output::field("CLI session", "Locked");
+                print_agent_status(&agent, &vault_path);
+                if !agent.is_unlocked_for(&vault_path) {
+                    Output::info("Run 'vaultic unlock' to access the vault");
+                }
                 println!();
             } else {
                 // No vault

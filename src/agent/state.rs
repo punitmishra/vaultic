@@ -58,17 +58,36 @@ pub struct AgentState {
 #[derive(Default)]
 struct Inner {
     /// `None` when locked; `Some` when an `unlock` succeeded and we're
-    /// holding a master key plus an open vault handle.
+    /// holding the master key in memory (but NOT the sled handle).
     open: Option<OpenVault>,
     /// Wallclock instant the daemon will auto-lock at if no further activity
     /// resets it. `None` means no scheduled lock (vault is locked).
     expires_at: Option<DateTime<Utc>>,
 }
 
+/// What the agent caches when "unlocked": the path it can re-open at, and
+/// the master key it can re-unlock with. **Crucially, NO open `VaultStorage`
+/// handle.** sled enforces an exclusive process-wide lock on its database
+/// directory, so holding a long-lived handle would prevent the CLI/TUI/GUI
+/// from opening the same vault. Each method that needs storage opens and
+/// drops it within its own scope.
 struct OpenVault {
     vault_path: PathBuf,
-    /// Storage handle, already unlocked with the master key.
-    storage: VaultStorage,
+    master_key: MasterKey,
+}
+
+impl OpenVault {
+    /// Open + unlock storage for one operation. The returned handle should
+    /// be dropped before the next request hits this vault, otherwise the
+    /// other vault clients will see "could not acquire lock" errors.
+    fn open_storage(&self) -> StateResult<VaultStorage> {
+        let mut storage =
+            VaultStorage::open(&self.vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
+        storage
+            .unlock(&self.master_key)
+            .map_err(classify_unlock_error)?;
+        Ok(storage)
+    }
 }
 
 impl AgentState {
@@ -84,13 +103,18 @@ impl AgentState {
     }
 
     /// Public read of the daemon's current state. Doesn't reset the
-    /// inactivity timer.
+    /// inactivity timer. Best-effort entry count: if opening sled fails
+    /// (the CLI / TUI is using it concurrently), we report `None`.
     pub async fn status(&self) -> StatusView {
         let inner = self.inner.lock().await;
         let entry_count = inner.open.as_ref().and_then(|o| {
-            // entry_count is best-effort; failure here just means we report
-            // None rather than fail the request.
-            o.storage.list_entries().ok().map(|v| v.len())
+            o.open_storage()
+                .and_then(|s| {
+                    s.list_entries()
+                        .map_err(|e| StateError::VaultIo(e.to_string()))
+                })
+                .ok()
+                .map(|v| v.len())
         });
         StatusView {
             unlocked: inner.open.is_some(),
@@ -103,26 +127,32 @@ impl AgentState {
         }
     }
 
-    /// Open the vault at `vault_path` using the supplied derived key. The
-    /// hex string is decoded; the daemon never sees the raw password.
+    /// Cache the master key for `vault_path`. Verifies by briefly opening
+    /// the vault and decrypting metadata, then drops the storage handle —
+    /// the agent doesn't keep sled open between calls so the CLI / TUI /
+    /// other tools can share the same database.
     pub async fn unlock(&self, vault_path: PathBuf, derived_key_hex: &str) -> StateResult<()> {
         let key_bytes = decode_key_hex(derived_key_hex)?;
         let master_key = MasterKey::from_bytes(key_bytes);
 
-        let mut storage =
-            VaultStorage::open(&vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
-        storage.unlock(&master_key).map_err(classify_unlock_error)?;
+        // Verify by opening + unlocking. The handle is dropped at the end
+        // of this scope; we don't keep it.
+        {
+            let mut storage =
+                VaultStorage::open(&vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
+            storage.unlock(&master_key).map_err(classify_unlock_error)?;
+        }
 
         let mut inner = self.inner.lock().await;
         inner.open = Some(OpenVault {
             vault_path,
-            storage,
+            master_key,
         });
         inner.expires_at = Some(self.compute_expiry());
         Ok(())
     }
 
-    /// Drop any held key + storage handle. Idempotent.
+    /// Drop any held key. Idempotent.
     pub async fn lock(&self) {
         let mut inner = self.inner.lock().await;
         inner.open = None;
@@ -133,8 +163,8 @@ impl AgentState {
     pub async fn list_summary(&self) -> StateResult<Vec<EntrySummary>> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or(StateError::Locked)?;
-        let entries = open
-            .storage
+        let storage = open.open_storage()?;
+        let entries = storage
             .list_entries()
             .map_err(|e| StateError::VaultIo(e.to_string()))?;
         let summaries = entries.iter().map(entry_to_summary).collect();
@@ -146,8 +176,8 @@ impl AgentState {
     pub async fn get_entry(&self, id: Uuid) -> StateResult<VaultEntry> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or(StateError::Locked)?;
-        let entry = open
-            .storage
+        let storage = open.open_storage()?;
+        let entry = storage
             .get_entry(&id)
             .map_err(|e| StateError::VaultIo(e.to_string()))?
             .ok_or(StateError::NotFound(id))?;
@@ -159,8 +189,8 @@ impl AgentState {
     pub async fn get_totp(&self, id: Uuid) -> StateResult<TotpView> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or(StateError::Locked)?;
-        let entry = open
-            .storage
+        let storage = open.open_storage()?;
+        let entry = storage
             .get_entry(&id)
             .map_err(|e| StateError::VaultIo(e.to_string()))?
             .ok_or(StateError::NotFound(id))?;
@@ -181,9 +211,9 @@ impl AgentState {
     pub async fn search(&self, query: &str) -> StateResult<Vec<EntrySummary>> {
         let mut inner = self.inner.lock().await;
         let open = inner.open.as_ref().ok_or(StateError::Locked)?;
+        let storage = open.open_storage()?;
         let filter = SearchFilter::new().with_query(query);
-        let entries = open
-            .storage
+        let entries = storage
             .search_entries(&filter)
             .map_err(|e| StateError::VaultIo(e.to_string()))?;
         let summaries = entries.iter().map(entry_to_summary).collect();

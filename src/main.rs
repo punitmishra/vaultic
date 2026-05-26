@@ -13,6 +13,7 @@
 use clap::Parser;
 use std::process::ExitCode;
 
+mod agent;
 mod ai;
 mod cli;
 mod crypto;
