@@ -40,8 +40,7 @@ CLI quick-start — init, unlock, add, list, search, lock:
 
 Full-screen TUI — vim-keys, fuzzy search, detail view, themes:
 
-<!-- TODO: replace ZZZZZ after recording `asciinema rec demos/tui.cast` interactively and `asciinema upload demos/tui.cast` -->
-[![asciicast — TUI](https://asciinema.org/a/ZZZZZ.svg)](https://asciinema.org/a/ZZZZZ)
+[![asciicast — TUI](https://asciinema.org/a/xWYM1mUaz00Klnaa.svg)](https://asciinema.org/a/xWYM1mUaz00Klnaa)
 
 To play locally without the asciinema.org embeds:
 
