@@ -19,12 +19,15 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             name: vaultic-linux-x86_64
             use_cross: false
+            include_gui: true
           - target: x86_64-unknown-linux-musl
             name: vaultic-linux-x86_64-musl
             use_cross: true
+            include_gui: false
           - target: aarch64-unknown-linux-gnu
             name: vaultic-linux-aarch64
             use_cross: true
+            include_gui: false
 
     steps:
       - uses: actions/checkout@v4
@@ -38,24 +41,50 @@ jobs:
         if: matrix.use_cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
+      # GUI binary needs X11 + Wayland + GL libs on the host. We only
+      # ship the GUI in the native x86_64-gnu artifact; cross-built
+      # musl/aarch64 artifacts contain `vaultic` + `vaultic-agent` only.
+      - name: Install GUI build deps
+        if: matrix.include_gui
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
       - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl' && !matrix.use_cross
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Build with cargo
-        if: "!matrix.use_cross"
+      - name: Build with cargo (full)
+        if: "!matrix.use_cross && matrix.include_gui"
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Build with cross
+      - name: Build with cargo (CLI + agent only)
+        if: "!matrix.use_cross && !matrix.include_gui"
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin vaultic --bin vaultic-agent
+
+      - name: Build with cross (CLI + agent only)
         if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }}
+        run: |
+          cross build --release --target ${{ matrix.target }} \
+            --bin vaultic --bin vaultic-agent
 
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czvf ../../../${{ matrix.name }}.tar.gz vaultic
+          if [ "${{ matrix.include_gui }}" = "true" ]; then
+            tar czvf ../../../${{ matrix.name }}.tar.gz \
+              vaultic vaultic-agent vaultic-gui
+          else
+            tar czvf ../../../${{ matrix.name }}.tar.gz \
+              vaultic vaultic-agent
+          fi
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
@@ -75,7 +104,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             name: vaultic-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -95,7 +124,8 @@ jobs:
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
-          tar czvf ../../../${{ matrix.name }}.tar.gz vaultic
+          tar czvf ../../../${{ matrix.name }}.tar.gz \
+            vaultic vaultic-agent vaultic-gui
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 
