@@ -948,6 +948,34 @@ impl From<&VaultEntry> for EntryRow {
     }
 }
 
+impl From<&crate::agent::protocol::EntrySummary> for EntryRow {
+    fn from(s: &crate::agent::protocol::EntrySummary) -> Self {
+        Self {
+            name: if s.favorite {
+                format!("★ {}", s.name)
+            } else {
+                s.name.clone()
+            },
+            entry_type: s.entry_type.to_string(),
+            username: s.username.clone().unwrap_or_else(|| "-".to_string()),
+            strength: s
+                .password_strength
+                .as_ref()
+                .map(|st| format!("{} {:?}", st.emoji(), st))
+                .unwrap_or_else(|| "-".to_string()),
+            last_used: s
+                .last_accessed
+                .map(|t| t.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "Never".to_string()),
+            tags: if s.tags.is_empty() {
+                "-".to_string()
+            } else {
+                s.tags.join(", ")
+            },
+        }
+    }
+}
+
 /// Display a table of entries
 pub fn display_entries_table(entries: &[VaultEntry]) {
     if entries.is_empty() {
@@ -959,6 +987,20 @@ pub fn display_entries_table(entries: &[VaultEntry]) {
     let table = Table::new(rows).with(Style::rounded()).to_string();
     println!("{}", table);
     println!("\n{} entries", entries.len());
+}
+
+/// Display a table of entry summaries (the agent-routed equivalent of
+/// `display_entries_table`).
+pub fn display_summaries_table(summaries: &[crate::agent::protocol::EntrySummary]) {
+    if summaries.is_empty() {
+        Output::info("No entries found");
+        return;
+    }
+
+    let rows: Vec<EntryRow> = summaries.iter().map(EntryRow::from).collect();
+    let table = Table::new(rows).with(Style::rounded()).to_string();
+    println!("{}", table);
+    println!("\n{} entries", summaries.len());
 }
 
 /// Display a single entry
@@ -1728,19 +1770,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             weak,
             limit,
         } => {
-            // Require unlocked vault
-            let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr
-                .load()
-                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let vault_path = default_vault_path(&cli.vault);
 
-            // Refresh session
-            let _ = session_mgr.refresh(15);
-
-            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
-            storage.unlock(&master_key)?;
-
-            // Build search filter
             let tag_list: Vec<String> = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
@@ -1757,9 +1788,34 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 limit,
             };
 
-            let entries = storage.search_entries(&filter)?;
+            // Try the agent first. If it's unlocked for this vault, we don't
+            // need a CLI session — the daemon runs the same filter against
+            // its open vault and returns summaries.
+            match agent_bridge::route_list_filtered(&vault_path, filter.clone()) {
+                Some(Ok(summaries)) => {
+                    display_summaries_table(&summaries);
+                    return Ok(());
+                }
+                Some(Err(msg)) => {
+                    Output::error(&msg);
+                    return Ok(());
+                }
+                None => {
+                    // Fall through to local-session path.
+                }
+            }
 
-            // Display as table (handles empty case internally)
+            // Local fallback: requires a CLI session.
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
+            let entries = storage.search_entries(&filter)?;
             display_entries_table(&entries);
 
             Ok(())
@@ -2003,19 +2059,8 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Search { query } => {
-            // Require unlocked vault
-            let session_mgr = crate::session::SessionManager::new()?;
-            let (vault_path, master_key) = session_mgr
-                .load()
-                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let vault_path = default_vault_path(&cli.vault);
 
-            // Refresh session
-            let _ = session_mgr.refresh(15);
-
-            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
-            storage.unlock(&master_key)?;
-
-            // Get all entries or search with query
             let filter = crate::models::SearchFilter {
                 query: query.clone(),
                 entry_type: None,
@@ -2028,6 +2073,74 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 limit: None,
             };
 
+            // Try the agent first: list_filtered to populate the picker,
+            // then get_entry_by_id for the selected row's full record.
+            match agent_bridge::route_list_filtered(&vault_path, filter.clone()) {
+                Some(Ok(summaries)) => {
+                    if summaries.is_empty() {
+                        if let Some(ref q) = query {
+                            Output::warning(&format!("No entries found matching '{}'", q));
+                        } else {
+                            Output::warning("No entries in vault");
+                        }
+                        return Ok(());
+                    }
+                    let names: Vec<String> = summaries
+                        .iter()
+                        .map(|s| {
+                            let username = s.username.as_deref().unwrap_or("-");
+                            format!("{} ({})", s.name, username)
+                        })
+                        .collect();
+                    let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+                        .with_prompt("Search entries")
+                        .items(&names)
+                        .default(0)
+                        .interact()?;
+                    let id = summaries[selection].id;
+                    let entry = match agent_bridge::route_get_entry_by_id(&vault_path, id) {
+                        Some(Ok(e)) => e,
+                        Some(Err(msg)) => {
+                            Output::error(&msg);
+                            return Ok(());
+                        }
+                        None => {
+                            // Agent went away between the list and the fetch.
+                            // Honest failure rather than a silent fall-through
+                            // to a stale local session — the user picked from
+                            // the agent's view, so re-running is the right
+                            // call.
+                            Output::error("Agent stopped responding mid-search; please retry.");
+                            return Ok(());
+                        }
+                    };
+                    display_entry(&entry, false);
+                    if entry.password.is_some()
+                        && Prompts::confirm("Copy password to clipboard?", true)?
+                    {
+                        copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
+                    }
+                    return Ok(());
+                }
+                Some(Err(msg)) => {
+                    Output::error(&msg);
+                    return Ok(());
+                }
+                None => {
+                    // Fall through to local-session path.
+                }
+            }
+
+            // Local fallback: requires a CLI session.
+            let session_mgr = crate::session::SessionManager::new()?;
+            let (vault_path, master_key) = session_mgr
+                .load()
+                .map_err(|_| "Vault is locked. Run 'vaultic unlock' first.")?;
+            let _ = session_mgr.refresh(15);
+
+            let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
+            storage.unlock(&master_key)?;
+
             let entries = storage.search_entries(&filter)?;
 
             if entries.is_empty() {
@@ -2039,7 +2152,6 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            // Interactive fuzzy search
             let names: Vec<String> = entries
                 .iter()
                 .map(|e| {
@@ -2057,7 +2169,6 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let entry = &entries[selection];
             display_entry(entry, false);
 
-            // Offer to copy password
             if entry.password.is_some() && Prompts::confirm("Copy password to clipboard?", true)? {
                 copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
             }

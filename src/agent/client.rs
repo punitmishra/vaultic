@@ -14,7 +14,7 @@ use crate::agent::protocol::{
     read_frame_async, write_frame_async, AgentError, EntrySummary, ErrorCode, Frame, FramingError,
     Method, PongView, Request, Response, ResponseBody, StatusView, TotpView,
 };
-use crate::models::VaultEntry;
+use crate::models::{SearchFilter, VaultEntry};
 
 /// Errors a client call can return.
 ///
@@ -134,6 +134,14 @@ impl AgentClient {
 
     pub async fn search(&mut self, query: String) -> Result<Vec<EntrySummary>, ClientError> {
         let v = self.call(Method::Search { query }).await?;
+        serde_json::from_value(v).map_err(|e| ClientError::BadPayload(e.to_string()))
+    }
+
+    pub async fn list_filtered(
+        &mut self,
+        filter: SearchFilter,
+    ) -> Result<Vec<EntrySummary>, ClientError> {
+        let v = self.call(Method::ListFiltered { filter }).await?;
         serde_json::from_value(v).map_err(|e| ClientError::BadPayload(e.to_string()))
     }
 

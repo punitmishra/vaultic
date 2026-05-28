@@ -91,6 +91,7 @@ requests on a single connection.
 | `get_entry` | `{ "id": uuid }` | full entry incl. password/notes | Requires unlocked. |
 | `get_totp` | `{ "id": uuid }` | `{ "code": str, "period_remaining_seconds": uint, "period_total_seconds": uint }` | Requires unlocked. Errors with `not_found` if entry has no `totp_secret`. |
 | `search` | `{ "query": str }` | `[ EntrySummary ]` | Requires unlocked. Fuzzy match on name/username/url/tags. |
+| `list_filtered` | `{ "filter": SearchFilter }` | `[ EntrySummary ]` | Requires unlocked. Same fuzzy + flag filtering the local CLI does (query, entry_type, tags, folder, favorites_only, needs_rotation, weak_passwords, limit, offset). |
 
 Schemas for `EntrySummary` and the various views are defined in the canonical
 Rust types in `src/agent/protocol.rs`. Their JSON representations are pinned

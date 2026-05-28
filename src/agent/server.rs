@@ -336,6 +336,11 @@ async fn dispatch(state: &Arc<AgentState>, request: Request) -> ResponseBody {
             Err(e) => err_for(&e),
         },
 
+        Method::ListFiltered { filter } => match state.list_filtered(filter).await {
+            Ok(list) => ok_value(serde_json::to_value(list)),
+            Err(e) => err_for(&e),
+        },
+
         Method::Shutdown => ok_value(serde_json::to_value(
             serde_json::json!({"shutting_down": true}),
         )),

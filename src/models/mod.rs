@@ -566,17 +566,31 @@ pub enum AuditAction {
     FidoAuthenticated,
 }
 
-/// Search/filter parameters
-#[derive(Debug, Clone, Default)]
+/// Search/filter parameters.
+///
+/// `Serialize` / `Deserialize` are derived so the filter can travel over the
+/// agent wire protocol (`Method::ListFiltered`). All fields default to "no
+/// constraint", and `#[serde(default)]` keeps the on-the-wire shape forward-
+/// compatible for clients that send a partial filter.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SearchFilter {
+    #[serde(default)]
     pub query: Option<String>,
+    #[serde(default)]
     pub entry_type: Option<EntryType>,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub folder: Option<String>,
+    #[serde(default)]
     pub favorites_only: bool,
+    #[serde(default)]
     pub needs_rotation: bool,
+    #[serde(default)]
     pub weak_passwords: bool,
+    #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
     pub offset: usize,
 }
 
