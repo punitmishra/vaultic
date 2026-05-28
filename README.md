@@ -32,23 +32,29 @@ overall component layout lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 CLI quick-start — init, unlock, add, list, search, lock:
 
-<!-- TODO: replace XXXXX after `asciinema upload demos/quickstart.cast` -->
-[![asciicast — CLI quickstart](https://asciinema.org/a/XXXXX.svg)](https://asciinema.org/a/XXXXX)
+[![asciicast — CLI quickstart](https://asciinema.org/a/w23jPRl4ss1w5mRu.svg)](https://asciinema.org/a/w23jPRl4ss1w5mRu)
 
 `vaultic-agent` + CLI bridge — agent holds the key, CLI routes through it:
 
-<!-- TODO: replace YYYYY after `asciinema upload demos/daemon.cast` -->
-[![asciicast — vaultic-agent bridge](https://asciinema.org/a/YYYYY.svg)](https://asciinema.org/a/YYYYY)
+[![asciicast — vaultic-agent bridge](https://asciinema.org/a/wL5jACbOQlLTcdd0.svg)](https://asciinema.org/a/wL5jACbOQlLTcdd0)
 
-To play locally without uploading:
+Full-screen TUI — vim-keys, fuzzy search, detail view, themes:
+
+<!-- TODO: replace ZZZZZ after recording `asciinema rec demos/tui.cast` interactively and `asciinema upload demos/tui.cast` -->
+[![asciicast — TUI](https://asciinema.org/a/ZZZZZ.svg)](https://asciinema.org/a/ZZZZZ)
+
+To play locally without the asciinema.org embeds:
 
 ```bash
 asciinema play demos/quickstart.cast
 asciinema play demos/daemon.cast
+asciinema play demos/tui.cast
 ```
 
-To re-record after a CLI change, see [`demos/quickstart.sh`](demos/quickstart.sh)
-and [`demos/daemon.sh`](demos/daemon.sh).
+To re-record after a CLI change, see [`demos/quickstart.sh`](demos/quickstart.sh),
+[`demos/daemon.sh`](demos/daemon.sh), and [`demos/tui.sh`](demos/tui.sh).
+The TUI cast is recorded interactively (the TUI takes keystrokes); the other
+two run unattended via `--command`.
 
 ## Features
 
