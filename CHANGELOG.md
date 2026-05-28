@@ -7,9 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-See [open issues](https://github.com/punitmishra/vaultic/issues) for what's
-in flight, especially the `bincode 1 → 2` migration in
+CLI↔daemon bridge work toward the v2.2.0 line, plus repo-hygiene docs
+(SECURITY.md, CONTRIBUTING.md, GOVERNANCE.md, issue/PR templates). See
+[#21](https://github.com/punitmishra/vaultic/issues/21) for the full bridge
+plan and [open issues](https://github.com/punitmishra/vaultic/issues) for
+the rest, especially `bincode 1 → 2` in
 [#6](https://github.com/punitmishra/vaultic/issues/6) Phase B.
+
+### Added — CLI ↔ daemon bridge ([#21](https://github.com/punitmishra/vaultic/issues/21))
+
+When `vaultic-agent` is running and unlocked for the active vault, the
+CLI now routes through it instead of opening sled directly. This is what
+lets a CLI user work against a vault that the GUI (or any other client)
+is the one holding open.
+
+- **v1 — session sync** ([#29](https://github.com/punitmishra/vaultic/pull/29)):
+  `vaultic unlock` writes the CLI session **and** notifies a running
+  agent (best-effort; if the agent isn't running, the CLI behaves as
+  before). `vaultic lock` clears both. `vaultic status` shows agent
+  state alongside vault/session and prefers the agent's entry count
+  when unlocked for the same vault.
+- **v2 — read routing** ([#30](https://github.com/punitmishra/vaultic/pull/30)):
+  `vaultic get` and `vaultic totp show` (including `--watch`) try the
+  agent first and fall back to the local-session path on a clean miss.
+  The `--watch` loop reconnects per tick and exits cleanly if the agent
+  stops being routable.
+- **v3 — list + search routing** ([#31](https://github.com/punitmishra/vaultic/pull/31)):
+  `vaultic list` and `vaultic search` go through the agent's new
+  `Method::ListFiltered { filter: SearchFilter }`. The full
+  `SearchFilter` (folder, tags, favorites-only, needs-rotation,
+  weak-passwords, limit, offset) is honored over the wire — `list
+  --weak` and `list --needs-rotation` produce the same set whether they
+  ran locally or through the daemon.
+
+### Changed
+
+- **Agent caches the master key only** (introduced with #29). The
+  daemon no longer holds a long-lived sled handle — each request opens
+  storage, performs the operation, and drops the handle. This is what
+  lets the CLI, TUI, GUI, and agent all share the same vault directory
+  without tripping sled's exclusive process lock.
+- **`EntrySummary` extended** with `entry_type`, `password_strength`,
+  and `last_accessed`, so the CLI's Type / Strength / Last Used columns
+  render identically through the agent or locally. The new fields are
+  pinned by a `json_shape_*` test for forward-compat.
+- **`SearchFilter` is now `Serialize` + `Deserialize`** (every field is
+  `#[serde(default)]` so older clients keep working).
+
+### Internal
+
+- New `src/cli/agent_bridge.rs` (~840 lines): three-state
+  `Option<Result<...>>` helpers — `None` means "agent isn't routable,
+  fall back to local sled"; `Some(Ok)` means success; `Some(Err)` means
+  surface this error to the user. Each helper has a `_at`
+  `pub(crate)` variant so tests can drive a real daemon on a temp
+  socket without touching the global socket path.
+- Test count: **359 → 435** (+76 across the three sessions). 16 new
+  end-to-end tests boot a real daemon on a temp socket and exercise
+  the full request path.
+
+### Documentation
+
+- `docs/AGENT_PROTOCOL.md` updated for `Method::ListFiltered`.
+- `ROADMAP.md` refreshed for the v2.2.0+ planning surface
+  ([#28](https://github.com/punitmishra/vaultic/pull/28)).
+- README + ARCHITECTURE refresh for the three-binary layout (97750fa).
+- New repo-hygiene docs: `SECURITY.md`, `CONTRIBUTING.md` (DCO sign-off
+  required), `GOVERNANCE.md`, and `.github/` issue + PR templates.
 
 ## [2.1.0] - 2026-05-23
 
