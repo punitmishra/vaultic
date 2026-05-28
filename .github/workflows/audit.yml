@@ -1,0 +1,33 @@
+name: Cargo audit
+
+on:
+  schedule:
+    # Mondays at 09:17 UTC. Off-the-hour to avoid the cron rush.
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # We surface advisories without failing the workflow. The known
+      # `--features gpg` sequoia-openpgp advisory is tracked in
+      # SECURITY.md and cleared upstream as soon as a clean release
+      # ships. This step is informational; reaction happens in PRs.
+      - name: Run cargo audit
+        run: cargo audit
+        continue-on-error: true
