@@ -20,13 +20,40 @@ on-disk vault format:
 
 | Binary | What it does |
 |---|---|
-| `vaultic` | The CLI + TUI. Original surface — init, unlock, add, list, search, import/export, recovery key, sharing, TOTP, and a full-screen ratatui mode (`vaultic tui`). |
-| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves clients (the GUI today; CLI / browser-extension later) over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
+| `vaultic` | The CLI + TUI. Original surface — init, unlock, add, list, search, import/export, recovery key, sharing, TOTP, and a full-screen ratatui mode (`vaultic tui`). When `vaultic-agent` is running and unlocked for the active vault, list/get/search/totp automatically route through it instead of opening the on-disk vault directly. |
+| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves the CLI and GUI over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
 | `vaultic-gui` | An [eframe](https://github.com/emilk/egui)/egui desktop app. Talks to `vaultic-agent`. Unlock screen, entry list with fuzzy search, detail view, live TOTP codes, four built-in themes, vim-style keyboard nav, 30-second clipboard auto-clear. Runs Argon2id locally so the password never leaves the GUI process. |
 
 Wire format and threat model for the agent ↔ client conversation are
 documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). The
 overall component layout lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Demos
+
+CLI quick-start — init, unlock, add, list, search, lock:
+
+[![asciicast — CLI quickstart](https://asciinema.org/a/w23jPRl4ss1w5mRu.svg)](https://asciinema.org/a/w23jPRl4ss1w5mRu)
+
+`vaultic-agent` + CLI bridge — agent holds the key, CLI routes through it:
+
+[![asciicast — vaultic-agent bridge](https://asciinema.org/a/wL5jACbOQlLTcdd0.svg)](https://asciinema.org/a/wL5jACbOQlLTcdd0)
+
+Full-screen TUI — vim-keys, fuzzy search, detail view, themes:
+
+[![asciicast — TUI](https://asciinema.org/a/xWYM1mUaz00Klnaa.svg)](https://asciinema.org/a/xWYM1mUaz00Klnaa)
+
+To play locally without the asciinema.org embeds:
+
+```bash
+asciinema play demos/quickstart.cast
+asciinema play demos/daemon.cast
+asciinema play demos/tui.cast
+```
+
+To re-record after a CLI change, see [`demos/quickstart.sh`](demos/quickstart.sh),
+[`demos/daemon.sh`](demos/daemon.sh), and [`demos/tui.sh`](demos/tui.sh).
+The TUI cast is recorded interactively (the TUI takes keystrokes); the other
+two run unattended via `--command`.
 
 ## Features
 
@@ -66,12 +93,27 @@ overall component layout lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 #### Daemon (`vaultic-agent`) — new in v2.1
 - Unix-socket server with peer-credential auth (same UID only)
-- 9 protocol methods: ping, status, unlock, lock, list_summary,
-  get_entry, get_totp, search, shutdown
+- 10 protocol methods: ping, status, unlock, lock, list_summary,
+  list_filtered, get_entry, get_totp, search, shutdown
 - Holds unlocked vault key in memory until 15-min inactivity timeout
   or explicit lock / shutdown
+- Caches the master key only — opens sled per request so the CLI,
+  TUI, GUI, and agent can share the same vault directory without
+  fighting sled's process-wide lock
 - Detects stale sockets from crashed daemons and recreates them
 - Graceful SIGINT shutdown unlinks the socket
+
+#### CLI ↔ daemon bridge — `[Unreleased]`
+When `vaultic-agent` is running and unlocked for the active vault:
+- `vaultic unlock` writes the CLI session AND notifies the agent;
+  `vaultic lock` clears both. `vaultic status` shows agent state
+  alongside vault/session.
+- `vaultic list`, `search`, `get`, and `totp show` (including
+  `--watch`) route through the agent's protocol methods. Same
+  filters and same output as the local-sled path; falls back to
+  local sled cleanly if the agent isn't routable.
+- See [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) for the wire
+  format and [`CHANGELOG.md`](CHANGELOG.md) for the rollout.
 
 #### GUI (`vaultic-gui`) — new in v2.1
 - Connects to `vaultic-agent` over its Unix socket
@@ -203,10 +245,12 @@ cargo build --release
 ./target/release/vaultic-agent stop
 ```
 
-The agent and GUI use the existing on-disk vault — same files the CLI
-reads. They don't currently share unlock state with `vaultic unlock`
-(CLI uses session files, daemon uses in-memory state); unlocking via
-the GUI is independent of unlocking via the CLI.
+The agent, GUI, and CLI use the same on-disk vault. As of the
+`[Unreleased]` line, unlock/lock state is bridged: `vaultic unlock`
+notifies a running agent, `vaultic lock` clears it, and the CLI's
+`list`/`get`/`search`/`totp show` commands route through the agent
+when one is available. See [`CHANGELOG.md`](CHANGELOG.md) for the
+exact rollout (PRs #29/#30/#31).
 
 ---
 
@@ -567,39 +611,28 @@ cargo clippy
 
 ---
 
-## Test Results (v2.1.0)
+## Documentation
 
-```
-cargo test --release: 359 tests passing
-  - lib: 126 unit tests (crypto, storage, models, migration, recovery,
-    ai, totp, agent protocol/state/server/client/keys, gui theme)
-  - bin: 169 unit tests (CLI commands + lib re-runs)
-  - integration: 15 agent integration tests (real Unix-socket round
-    trips against fixture vaults)
-  - integration: 44 storage / model integration tests
-  - doctests: 5 code examples in module docs
-
-cargo build --release: Success (vaultic, vaultic-agent, vaultic-gui)
-cargo clippy --release --all-features -- -D warnings: clean
-cargo fmt --check: clean
-cargo bench --bench vault_ops: list_entries 16 ms / search 20 ms on
-  10k entries
-
-cargo audit:
-  1 vulnerability (sequoia-openpgp; --features gpg only)
-  4 unmaintained warnings (1 direct: bincode; 3 transitive)
-```
+- [`SECURITY.md`](SECURITY.md) — vulnerability reporting (private GitHub Security Advisories), threat model, supported versions
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — DCO sign-off, dev setup, test/lint commands, code style, crypto-PR bar
+- [`GOVERNANCE.md`](GOVERNANCE.md) — single-maintainer-with-trusted-reviewers model, decision-making, release process
+- [`VIBE_CODING.md`](VIBE_CODING.md) — honest essay on how Vaultic is built with heavy AI assistance: what works, what fails, where the maintainer overrode the assistant
+- [`CHANGELOG.md`](CHANGELOG.md) — what shipped in each release
+- [`ROADMAP.md`](ROADMAP.md) — what's planned, what's in flight
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — component layout
+- [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) — daemon wire protocol + threat model
 
 ---
 
 ## Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Run tests (`cargo test`)
-4. Format code (`cargo fmt`)
-5. Submit a pull request
+PRs welcome. The short version:
+
+- For anything beyond a typo or small fix, open an issue first so we can align on shape.
+- Every commit needs a `Signed-off-by:` line — Vaultic uses the [Developer Certificate of Origin](https://developercertificate.org/), the same sign-off as the Linux kernel. `git commit -s` does it for you.
+- `cargo test`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo fmt --all -- --check` must be clean before merge.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide.
 
 ---
 
@@ -618,4 +651,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Security Notice**: This is a security-sensitive application. Review the code before using with real credentials. Report vulnerabilities responsibly.
+**Security Notice**: Vaultic stores secrets. Review the code before
+trusting it with real credentials. **Don't open a public GitHub issue
+for security problems** — use the private channel documented in
+[`SECURITY.md`](SECURITY.md) or
+[GitHub Security Advisories](https://github.com/punitmishra/vaultic/security/advisories/new).
