@@ -7,12 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-CLI↔daemon bridge work toward the v2.2.0 line, plus repo-hygiene docs
-(SECURITY.md, CONTRIBUTING.md, GOVERNANCE.md, issue/PR templates). See
-[#21](https://github.com/punitmishra/vaultic/issues/21) for the full bridge
-plan and [open issues](https://github.com/punitmishra/vaultic/issues) for
-the rest, especially `bincode 1 → 2` in
-[#6](https://github.com/punitmishra/vaultic/issues/6) Phase B.
+See [open issues](https://github.com/punitmishra/vaultic/issues) for what's
+in flight. Notable next-up: `bincode 1 → 2` in
+[#6](https://github.com/punitmishra/vaultic/issues/6) Phase B and the
+mlock follow-through in [#24](https://github.com/punitmishra/vaultic/issues/24).
+
+## [2.2.0] - 2026-05-28
+
+The CLI and the daemon now share unlock state. When `vaultic-agent` is
+running, `vaultic` routes through it; when it isn't, the CLI behaves
+exactly as before. This release also adds the OSS-foundation docs
+(`SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `VIBE_CODING.md`)
+that close [#21](https://github.com/punitmishra/vaultic/issues/21) and
+the broader repo-hygiene work.
 
 ### Added — CLI ↔ daemon bridge ([#21](https://github.com/punitmishra/vaultic/issues/21))
 
@@ -71,9 +78,18 @@ is the one holding open.
 - `docs/AGENT_PROTOCOL.md` updated for `Method::ListFiltered`.
 - `ROADMAP.md` refreshed for the v2.2.0+ planning surface
   ([#28](https://github.com/punitmishra/vaultic/pull/28)).
-- README + ARCHITECTURE refresh for the three-binary layout (97750fa).
+- README refresh for the three-binary layout, the CLI/daemon bridge,
+  and three asciinema casts on the front page
+  ([#34](https://github.com/punitmishra/vaultic/pull/34)).
 - New repo-hygiene docs: `SECURITY.md`, `CONTRIBUTING.md` (DCO sign-off
-  required), `GOVERNANCE.md`, and `.github/` issue + PR templates.
+  required), `GOVERNANCE.md`, `VIBE_CODING.md` (honest report on AI-assisted
+  development), and `.github/` issue + PR templates
+  ([#32](https://github.com/punitmishra/vaultic/pull/32)).
+- CI workflows match the documented test matrix; release tarballs now
+  contain all three binaries on native targets; weekly `cargo audit`
+  ([#33](https://github.com/punitmishra/vaultic/pull/33)).
+- `FUNDING.yml` enables the GitHub Sponsors button
+  ([#35](https://github.com/punitmishra/vaultic/pull/35)).
 
 ## [2.1.0] - 2026-05-23
 
@@ -281,7 +297,8 @@ Initial release. Core functionality: vault init/unlock/lock, encrypted
 storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
-[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/punitmishra/vaultic/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/punitmishra/vaultic/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/punitmishra/vaultic/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/punitmishra/vaultic/compare/v2.0.0...v2.0.1
