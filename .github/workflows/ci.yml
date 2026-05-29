@@ -30,10 +30,19 @@ jobs:
             short: macos
             features: ""
             features-name: default
+          # macOS does NOT run --all-features. Brew's `nettle` formula
+          # tracks the latest upstream (4.x), and `nettle-sys 2.3.2`
+          # (pulled by sequoia-openpgp under --features gpg) still
+          # targets nettle 3.x headers, so the build fails on
+          # `bindgen-wrapper.h: fatal error: 'nettle/pgp.h' file not
+          # found`. Linux's nettle-dev is still 3.x, so the gpg path
+          # is exercised there. We test the `fido2` feature on macOS
+          # since FIDO2 is the more important hardware-auth path
+          # and macOS ships its deps via system frameworks.
           - os: macos-latest
             short: macos
-            features: "--all-features"
-            features-name: all-features
+            features: "--features fido2"
+            features-name: fido2
     steps:
       - uses: actions/checkout@v4
 
@@ -58,17 +67,9 @@ jobs:
         run: |
           sudo apt-get install -y libudev-dev nettle-dev libgmp-dev clang llvm pkg-config
 
-      # Apple Silicon brew installs under /opt/homebrew, which bindgen
-      # (via nettle-sys for sequoia-openpgp) doesn't find unless we
-      # point the include/pkg-config search paths at it explicitly.
-      - name: Install all-features deps (macOS)
-        if: matrix.os == 'macos-latest' && matrix.features-name == 'all-features'
-        run: |
-          brew install nettle gmp pkg-config
-          BREW_PREFIX=$(brew --prefix)
-          echo "PKG_CONFIG_PATH=$BREW_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$BREW_PREFIX/include" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$BREW_PREFIX/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+      # macOS fido2 build uses system frameworks; no brew deps needed.
+      # (The previous `brew install nettle gmp` step was for `gpg`,
+      # which we no longer build on macOS — see matrix comment.)
 
       - name: Cache cargo
         uses: actions/cache@v4
