@@ -88,13 +88,19 @@ macos_test_task:
   macos_instance:
     image: ghcr.io/cirruslabs/macos-sequoia-base:latest
 
+  # macOS does NOT run --all-features. Brew's nettle is 4.x while
+  # nettle-sys (pulled by sequoia-openpgp under --features gpg)
+  # targets nettle 3.x — the build fails on a missing nettle/pgp.h
+  # header. Linux all-features still exercises the gpg path
+  # (Debian's nettle-dev is still 3.x). On macOS we test the more
+  # important hardware-auth path (FIDO2 via system frameworks).
   matrix:
     - env:
         FEATURES: ""
         FEATURES_NAME: default
     - env:
-        FEATURES: "--all-features"
-        FEATURES_NAME: all-features
+        FEATURES: "--features fido2"
+        FEATURES_NAME: fido2
 
   cargo_cache:
     folder: $HOME/.cargo/registry
@@ -111,11 +117,6 @@ macos_test_task:
       sh -s -- -y --default-toolchain stable \
         --component clippy --component rustfmt
     echo "$HOME/.cargo/bin" >> $CIRRUS_ENV
-
-  install_all_features_deps_script: |
-    if [ "$FEATURES_NAME" = "all-features" ]; then
-      brew install nettle gmp pkg-config
-    fi
 
   clippy_script: cargo clippy --all-targets $FEATURES -- -D warnings
 
