@@ -89,9 +89,14 @@ jobs:
       - name: Build release
         run: cargo build --release ${{ matrix.features }}
 
+  # Advisory only. nixpkgs' default crate fetcher periodically gets 403'd
+  # by crates.io (User-Agent / rate-limit interplay). This isn't our bug;
+  # the real production build path is `cargo build --release` above. Keep
+  # the Nix flake honest, but don't block PRs when upstream is broken.
   nix:
     name: Nix Build
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

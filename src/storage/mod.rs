@@ -588,8 +588,8 @@ impl VaultStorage {
             logs.push(log);
         }
 
-        // Sort by timestamp descending
-        logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        // Sort by timestamp descending.
+        logs.sort_by_key(|log| std::cmp::Reverse(log.timestamp));
         logs.truncate(limit);
 
         Ok(logs)
