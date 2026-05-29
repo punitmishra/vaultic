@@ -2,9 +2,9 @@
 # frozen_string_literal: true
 
 class Vaultic < Formula
-  desc "Local-first, hardware-secured password manager with AI-powered management"
+  desc "Local-first, hardware-backed password manager with CLI, TUI, and GUI"
   homepage "https://github.com/punitmishra/vaultic"
-  version "2.1.0"
+  version "2.2.0"
   license "MIT"
 
   # SHA256 placeholders are substituted by the update-homebrew job in
@@ -35,9 +35,15 @@ class Vaultic < Formula
   end
 
   def install
+    # The release tarballs ship the binaries available on each target.
+    # macOS (Apple Silicon and Intel) and Linux x86_64 ship all three;
+    # Linux ARM64 ships the CLI + agent only — no GUI binary on cross
+    # builds. Install whichever are present.
     bin.install "vaultic"
+    bin.install "vaultic-agent" if File.exist?("vaultic-agent")
+    bin.install "vaultic-gui" if File.exist?("vaultic-gui")
 
-    # Generate shell completions
+    # Generate shell completions for the CLI.
     generate_completions_from_executable(bin/"vaultic", "completions")
   end
 
@@ -60,10 +66,17 @@ class Vaultic < Formula
 
       For Git credential helper:
         git config --global credential.helper vaultic
+
+      The optional Unix-socket daemon (`vaultic-agent`) and desktop GUI
+      (`vaultic-gui`) are installed alongside `vaultic` on macOS and
+      Linux x86_64. See:
+        vaultic-agent --help
+        vaultic-gui --help
     EOS
   end
 
   test do
-    assert_match "vaultic", shell_output("#{bin}/vaultic --version")
+    assert_match "vaultic #{version}", shell_output("#{bin}/vaultic --version")
+    assert_match "vaultic-agent", shell_output("#{bin}/vaultic-agent --version") if (bin/"vaultic-agent").exist?
   end
 end
