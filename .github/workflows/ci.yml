@@ -58,9 +58,17 @@ jobs:
         run: |
           sudo apt-get install -y libudev-dev nettle-dev libgmp-dev clang llvm pkg-config
 
+      # Apple Silicon brew installs under /opt/homebrew, which bindgen
+      # (via nettle-sys for sequoia-openpgp) doesn't find unless we
+      # point the include/pkg-config search paths at it explicitly.
       - name: Install all-features deps (macOS)
         if: matrix.os == 'macos-latest' && matrix.features-name == 'all-features'
-        run: brew install nettle gmp pkg-config
+        run: |
+          brew install nettle gmp pkg-config
+          BREW_PREFIX=$(brew --prefix)
+          echo "PKG_CONFIG_PATH=$BREW_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$BREW_PREFIX/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$BREW_PREFIX/lib:$LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Cache cargo
         uses: actions/cache@v4
