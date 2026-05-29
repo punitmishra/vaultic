@@ -1,6 +1,8 @@
 # Vaultic
 
-A lightweight, security-focused password manager written in Rust with hardware authentication, end-to-end encryption, and AI-powered management.
+A local-first password manager written in Rust. CLI, TUI, optional
+`ssh-agent`-style daemon, and a desktop GUI — all sharing one
+on-disk vault. No cloud, no servers, no telemetry.
 
 ```
  ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗██╗ ██████╗
@@ -10,12 +12,12 @@ A lightweight, security-focused password manager written in Rust with hardware a
   ╚████╔╝ ██║  ██║╚██████╔╝███████╗██║   ██║╚██████╗
    ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝   ╚═╝ ╚═════╝
 
- Local-first | Hardware Auth | AI-Powered | Zero Trust
+   Local-first  ·  Hardware-backed  ·  Yours, on disk
 ```
 
 ## Three binaries
 
-Vaultic 2.1 ships three programs that share one library and one
+Vaultic 2.2 ships three programs that share one library and one
 on-disk vault format:
 
 | Binary | What it does |
@@ -28,7 +30,9 @@ Wire format and threat model for the agent ↔ client conversation are
 documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). The
 overall component layout lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Demos
+## What it looks like
+
+Three short asciinema casts — click any to play.
 
 CLI quick-start — init, unlock, add, list, search, lock:
 
@@ -91,7 +95,7 @@ two run unattended via `--command`.
 - Batch operations (tag, delete, move, favorite)
 - Git credential helper
 
-#### Daemon (`vaultic-agent`) — new in v2.1
+#### Daemon (`vaultic-agent`)
 - Unix-socket server with peer-credential auth (same UID only)
 - 10 protocol methods: ping, status, unlock, lock, list_summary,
   list_filtered, get_entry, get_totp, search, shutdown
@@ -103,7 +107,7 @@ two run unattended via `--command`.
 - Detects stale sockets from crashed daemons and recreates them
 - Graceful SIGINT shutdown unlinks the socket
 
-#### CLI ↔ daemon bridge — `[Unreleased]`
+#### CLI ↔ daemon bridge
 When `vaultic-agent` is running and unlocked for the active vault:
 - `vaultic unlock` writes the CLI session AND notifies the agent;
   `vaultic lock` clears both. `vaultic status` shows agent state
@@ -115,7 +119,7 @@ When `vaultic-agent` is running and unlocked for the active vault:
 - See [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) for the wire
   format and [`CHANGELOG.md`](CHANGELOG.md) for the rollout.
 
-#### GUI (`vaultic-gui`) — new in v2.1
+#### GUI (`vaultic-gui`)
 - Connects to `vaultic-agent` over its Unix socket
 - Unlock dialog runs Argon2id KDF locally; daemon never sees the
   password
@@ -621,6 +625,20 @@ cargo clippy
 - [`ROADMAP.md`](ROADMAP.md) — what's planned, what's in flight
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — component layout
 - [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) — daemon wire protocol + threat model
+
+---
+
+## Sponsor the project
+
+Vaultic is maintained by one person and funded by [GitHub Sponsors](https://github.com/sponsors/punitmishra).
+The work that gets paid for: dependency bumps, security advisory follow-up,
+real-hardware FIDO2 testing, the mlock follow-through in
+[#24](https://github.com/punitmishra/vaultic/issues/24), and keeping the
+GUI alive across egui releases.
+
+Sponsoring does **not** unlock features that aren't already free — Vaultic is
+MIT-licensed and the open-source build has every feature. It funds the
+maintenance work that lives behind those features.
 
 ---
 
