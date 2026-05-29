@@ -1020,9 +1020,9 @@ pub fn display_entry(entry: &VaultEntry, show_password: bool) {
         Output::field("Username", username);
     }
 
-    if entry.password.is_some() {
+    if let Some(ref password) = entry.password {
         if show_password {
-            Output::field("Password", entry.password.as_ref().unwrap().expose());
+            Output::field("Password", password.expose());
         } else {
             Output::masked_password("••••••••••••");
         }
@@ -2115,10 +2115,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                     display_entry(&entry, false);
-                    if entry.password.is_some()
-                        && Prompts::confirm("Copy password to clipboard?", true)?
-                    {
-                        copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
+                    if let Some(ref password) = entry.password {
+                        if Prompts::confirm("Copy password to clipboard?", true)? {
+                            copy_to_clipboard(password.expose(), 30)?;
+                        }
                     }
                     return Ok(());
                 }
@@ -2169,8 +2169,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let entry = &entries[selection];
             display_entry(entry, false);
 
-            if entry.password.is_some() && Prompts::confirm("Copy password to clipboard?", true)? {
-                copy_to_clipboard(entry.password.as_ref().unwrap().expose(), 30)?;
+            if let Some(ref password) = entry.password {
+                if Prompts::confirm("Copy password to clipboard?", true)? {
+                    copy_to_clipboard(password.expose(), 30)?;
+                }
             }
 
             Ok(())
@@ -2958,13 +2960,13 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|(_, names)| names.len() > 1)
                 .collect();
 
-            // Calculate health score
+            // Calculate health score. checked_div returns None for total == 0,
+            // which we treat as a perfect score.
             let issues = weak_passwords.len() + reused.len() + old_passwords.len();
-            let score = if total == 0 {
-                100
-            } else {
-                100 - (issues * 100 / total).min(100)
-            };
+            let score = (issues * 100)
+                .checked_div(total)
+                .map(|pct| 100usize.saturating_sub(pct.min(100)))
+                .unwrap_or(100);
 
             let score_color = if score >= 80 {
                 "\x1b[32m"

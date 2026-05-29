@@ -118,8 +118,8 @@ impl PasswordAi {
             }
         }
 
-        // Sort by priority
-        suggestions.sort_by(|a, b| b.priority.cmp(&a.priority));
+        // Sort by priority, highest first.
+        suggestions.sort_by_key(|s| std::cmp::Reverse(s.priority));
         suggestions
     }
 
