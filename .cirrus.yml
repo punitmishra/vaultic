@@ -1,0 +1,150 @@
+# Cirrus CI configuration.
+#
+# Mirrors the contract documented in CONTRIBUTING.md and what
+# .github/workflows/ci.yml runs:  Linux + macOS  ×  default +
+# --all-features.  Plus a non-blocking `cargo audit` task.
+#
+# Cirrus is the primary CI runner while GitHub Actions remains
+# billing-locked (issue #8).  The Actions YAML is kept for parallel
+# coverage once that clears; both can run side by side.
+#
+# Tag pushes are excluded — release.yml handles those.
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: "0"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Linux test matrix
+# ──────────────────────────────────────────────────────────────────────────
+linux_test_task:
+  name: "Test (linux / $FEATURES_NAME)"
+  only_if: $CIRRUS_TAG == ''
+  auto_cancellation: true
+
+  container:
+    image: rust:1.74-bookworm
+    cpu: 4
+    memory: 8G
+
+  matrix:
+    - env:
+        FEATURES: ""
+        FEATURES_NAME: default
+    - env:
+        FEATURES: "--all-features"
+        FEATURES_NAME: all-features
+
+  cargo_cache:
+    folder: $CARGO_HOME/registry
+    fingerprint_script: cat Cargo.lock
+
+  target_cache:
+    folder: target
+    fingerprint_script:
+      - rustc --version
+      - cat Cargo.lock
+      - echo $FEATURES_NAME
+
+  # eframe / egui need X11 + Wayland + GL on Linux to compile.
+  install_gui_deps_script: |
+    apt-get update
+    apt-get install -y --no-install-recommends \
+      libxkbcommon-dev libwayland-dev \
+      libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+      libgl1-mesa-dev
+
+  # Extra deps only needed when building --all-features (gpg + fido2).
+  install_all_features_deps_script: |
+    if [ "$FEATURES_NAME" = "all-features" ]; then
+      apt-get install -y --no-install-recommends \
+        libudev-dev nettle-dev libgmp-dev clang llvm pkg-config
+    fi
+
+  rustup_components_script: rustup component add clippy rustfmt
+
+  fmt_script: |
+    if [ "$FEATURES_NAME" = "default" ]; then
+      cargo fmt --all -- --check
+    fi
+
+  clippy_script: cargo clippy --all-targets $FEATURES -- -D warnings
+
+  test_script: cargo test $FEATURES --verbose
+
+  build_script: cargo build --release $FEATURES
+
+  before_cache_script: rm -rf $CARGO_HOME/registry/index
+
+# ──────────────────────────────────────────────────────────────────────────
+# macOS test matrix (Apple Silicon)
+# ──────────────────────────────────────────────────────────────────────────
+macos_test_task:
+  name: "Test (macos / $FEATURES_NAME)"
+  only_if: $CIRRUS_TAG == ''
+  auto_cancellation: true
+
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-sequoia-base:latest
+
+  # macOS does NOT run --all-features. Brew's nettle is 4.x while
+  # nettle-sys (pulled by sequoia-openpgp under --features gpg)
+  # targets nettle 3.x — the build fails on a missing nettle/pgp.h
+  # header. Linux all-features still exercises the gpg path
+  # (Debian's nettle-dev is still 3.x). On macOS we test the more
+  # important hardware-auth path (FIDO2 via system frameworks).
+  matrix:
+    - env:
+        FEATURES: ""
+        FEATURES_NAME: default
+    - env:
+        FEATURES: "--features fido2"
+        FEATURES_NAME: fido2
+
+  cargo_cache:
+    folder: $HOME/.cargo/registry
+    fingerprint_script: cat Cargo.lock
+
+  target_cache:
+    folder: target
+    fingerprint_script:
+      - cat Cargo.lock
+      - echo $FEATURES_NAME
+
+  install_rust_script: |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+      sh -s -- -y --default-toolchain stable \
+        --component clippy --component rustfmt
+    echo "$HOME/.cargo/bin" >> $CIRRUS_ENV
+
+  clippy_script: cargo clippy --all-targets $FEATURES -- -D warnings
+
+  test_script: cargo test $FEATURES --verbose
+
+  build_script: cargo build --release $FEATURES
+
+  before_cache_script: rm -rf $HOME/.cargo/registry/index
+
+# ──────────────────────────────────────────────────────────────────────────
+# Cargo audit — non-blocking (advisory)
+#
+# We surface advisories on every push without failing the build. The
+# known sequoia-openpgp advisory under --features gpg is documented
+# in SECURITY.md and will clear upstream when a clean release ships;
+# we don't want that to gate every PR.
+# ──────────────────────────────────────────────────────────────────────────
+audit_task:
+  name: "Cargo audit"
+  only_if: $CIRRUS_TAG == ''
+  auto_cancellation: true
+  allow_failures: true
+
+  container:
+    image: rust:1.74-bookworm
+    cpu: 2
+    memory: 4G
+
+  install_audit_script: cargo install cargo-audit --locked
+
+  audit_script: cargo audit
