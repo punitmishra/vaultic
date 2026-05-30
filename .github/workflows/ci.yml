@@ -98,24 +98,10 @@ jobs:
       - name: Build release
         run: cargo build --release ${{ matrix.features }}
 
-  # Advisory only. nixpkgs' default crate fetcher periodically gets 403'd
-  # by crates.io (User-Agent / rate-limit interplay). This isn't our bug;
-  # the real production build path is `cargo build --release` above. Keep
-  # the Nix flake honest, but don't block PRs when upstream is broken.
-  nix:
-    name: Nix Build
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-
-      - name: Build with Nix
-        run: nix build --print-build-logs
-
-      - name: Build minimal
-        run: nix build .#minimal --print-build-logs
+  # Nix is intentionally not part of per-PR CI. nixpkgs' default crate
+  # fetcher periodically gets 403'd by crates.io (User-Agent / IP
+  # reputation), so a soft check here ended up red on every commit
+  # for reasons unrelated to our code. The flake remains validated
+  # locally via `nix develop` and `nix build`, and the dedicated
+  # `.github/workflows/nix.yml` workflow can be run manually from the
+  # Actions tab when needed.

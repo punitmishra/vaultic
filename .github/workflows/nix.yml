@@ -1,0 +1,30 @@
+name: Nix Build
+
+# Manual trigger only. The job validates that `nix build` and
+# `nix build .#minimal` still produce working binaries. It used to
+# run on every push/PR, but nixpkgs' default crate fetcher gets
+# intermittently 403'd by crates.io (User-Agent / IP reputation
+# rules) and the failures are not actionable on our side. Run this
+# from the Actions tab when you've touched flake.nix or want a
+# fresh confidence check.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nix:
+    name: Nix Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Build with Nix
+        run: nix build --print-build-logs
+
+      - name: Build minimal
+        run: nix build .#minimal --print-build-logs
