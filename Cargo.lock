@@ -4658,11 +4658,12 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "sequoia-openpgp"
-version = "1.22.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e858e4e9e48ff079cede92e1b45c942a5466ce9a4e3cc0c2a7e66586a718ef59"
+checksum = "c847f0f148cf238c3aec88d092fd3c4301c21e906829ea9e415ea7531f7ec094"
 dependencies = [
  "anyhow",
+ "argon2",
  "base64",
  "buffered-reader",
  "bzip2",
@@ -4673,15 +4674,13 @@ dependencies = [
  "idna",
  "lalrpop",
  "lalrpop-util",
- "lazy_static",
  "libc",
  "memsec",
  "nettle",
- "once_cell",
  "regex",
  "regex-syntax",
  "sha1collisiondetection",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "xxhash-rust",
 ]
 
