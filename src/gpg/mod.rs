@@ -103,6 +103,7 @@ impl GpgManager {
         chrono::DateTime::from_timestamp(
             self.cert
                 .primary_key()
+                .key()
                 .creation_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -141,7 +142,7 @@ impl GpgManager {
 
         let message = Message::new(&mut ciphertext);
 
-        let message = Encryptor2::for_recipients(message, vec![Recipient::from(recipient_key)])
+        let message = Encryptor::for_recipients(message, vec![Recipient::from(recipient_key)])
             .symmetric_algo(SymmetricAlgorithm::AES256)
             .build()?;
 
@@ -224,17 +225,13 @@ impl VerificationHelper for VaulticDecryptionHelper<'_> {
 }
 
 impl DecryptionHelper for VaulticDecryptionHelper<'_> {
-    fn decrypt<D>(
+    fn decrypt(
         &mut self,
         pkesks: &[PKESK],
         _skesks: &[SKESK],
         sym_algo: Option<SymmetricAlgorithm>,
-        mut decrypt: D,
-    ) -> anyhow::Result<Option<sequoia_openpgp::Fingerprint>>
-    where
-        D: FnMut(SymmetricAlgorithm, &SessionKey) -> bool,
-    {
-        // Find our encryption key
+        decrypt: &mut dyn FnMut(Option<SymmetricAlgorithm>, &SessionKey) -> bool,
+    ) -> anyhow::Result<Option<Cert>> {
         for key in self
             .cert
             .keys()
@@ -242,18 +239,18 @@ impl DecryptionHelper for VaulticDecryptionHelper<'_> {
             .supported()
             .secret()
         {
-            // Try to decrypt each PKESK
+            let key_handle: sequoia_openpgp::KeyHandle = key.key().fingerprint().into();
             for pkesk in pkesks {
-                // Try to match recipient - if wildcard recipient, try all keys
-                let try_decrypt = {
-                    let recipient = pkesk.recipient();
-                    let key_id = key.keyid();
-                    recipient.is_wildcard() || *recipient == key_id
-                };
+                // None recipient means wildcard — try all keys
+                let try_decrypt = pkesk.recipient().is_none_or(|r| r.aliases(&key_handle));
 
                 if try_decrypt {
-                    let mut keypair = if key.secret().is_encrypted() {
-                        // Need passphrase
+                    let mut keypair = if key
+                        .key()
+                        .optional_secret()
+                        .map(|s| s.is_encrypted())
+                        .unwrap_or(false)
+                    {
                         let passphrase = self
                             .passphrase
                             .as_ref()
@@ -274,7 +271,7 @@ impl DecryptionHelper for VaulticDecryptionHelper<'_> {
                         .map(|(algo, session_key)| decrypt(algo, &session_key))
                         .unwrap_or(false)
                     {
-                        return Ok(Some(self.cert.fingerprint()));
+                        return Ok(Some(self.cert.clone()));
                     }
                 }
             }

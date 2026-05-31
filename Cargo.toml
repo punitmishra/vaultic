@@ -44,7 +44,7 @@ ctap-hid-fido2 = { version = "3.5", optional = true }
 # authenticator = "0.4"  # Alternative FIDO2 crate
 
 # GPG Support (optional - requires nettle-dev system package)
-sequoia-openpgp = { version = "1.21", optional = true }
+sequoia-openpgp = { version = "2.3", optional = true }
 
 # Storage
 sled = "0.34"
