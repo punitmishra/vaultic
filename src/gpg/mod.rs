@@ -103,7 +103,8 @@ impl GpgManager {
         chrono::DateTime::from_timestamp(
             self.cert
                 .primary_key()
-                .key().creation_time()
+                .key()
+                .creation_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64,
@@ -241,7 +242,7 @@ impl DecryptionHelper for VaulticDecryptionHelper<'_> {
             let key_handle: sequoia_openpgp::KeyHandle = key.key().fingerprint().into();
             for pkesk in pkesks {
                 // None recipient means wildcard — try all keys
-                let try_decrypt = pkesk.recipient().map_or(true, |r| r.aliases(&key_handle));
+                let try_decrypt = pkesk.recipient().is_none_or(|r| r.aliases(&key_handle));
 
                 if try_decrypt {
                     let mut keypair = if key
