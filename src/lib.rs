@@ -55,6 +55,7 @@ pub mod fido2;
 pub mod gpg;
 pub mod gui;
 pub mod import;
+pub mod mcp;
 pub mod migration;
 pub mod models;
 pub mod recovery;
