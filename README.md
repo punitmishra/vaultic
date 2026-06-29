@@ -15,16 +15,17 @@ on-disk vault. No cloud, no servers, no telemetry.
    Local-first  ·  Hardware-backed  ·  Yours, on disk
 ```
 
-## Three binaries
+## Four binaries
 
-Vaultic 2.2 ships three programs that share one library and one
+Vaultic 2.2 ships four programs that share one library and one
 on-disk vault format:
 
 | Binary | What it does |
 |---|---|
 | `vaultic` | The CLI + TUI. Original surface — init, unlock, add, list, search, import/export, recovery key, sharing, TOTP, and a full-screen ratatui mode (`vaultic tui`). When `vaultic-agent` is running and unlocked for the active vault, list/get/search/totp automatically route through it instead of opening the on-disk vault directly. |
-| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves the CLI and GUI over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
+| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves the CLI, GUI, and MCP server over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
 | `vaultic-gui` | An [eframe](https://github.com/emilk/egui)/egui desktop app. Talks to `vaultic-agent`. Unlock screen, entry list with fuzzy search, detail view, live TOTP codes, four built-in themes, vim-style keyboard nav, 30-second clipboard auto-clear. Runs Argon2id locally so the password never leaves the GUI process. |
+| `vaultic-mcp` | [Model Context Protocol](https://modelcontextprotocol.io/) server for AI tool integration. Lets Claude Code and other MCP-compatible assistants securely access vault credentials without pasting secrets in chat. User consent prompts, rate limiting, all credentials stay local. See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md). |
 
 Wire format and threat model for the agent ↔ client conversation are
 documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). The
