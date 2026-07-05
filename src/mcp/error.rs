@@ -19,6 +19,10 @@ pub enum McpError {
     #[error("Access denied by user")]
     ConsentDenied,
 
+    /// Consent could not be obtained because there is no controlling terminal
+    #[error("Consent unavailable: no controlling terminal to prompt on. Run vaultic-mcp from a terminal, or use --no-consent in a trusted environment.")]
+    ConsentUnavailable,
+
     /// Agent communication error
     #[error("Agent error: {0}")]
     Agent(#[from] ClientError),
@@ -53,6 +57,11 @@ impl McpError {
             }
             McpError::ConsentDenied => {
                 "The user denied access to this credential.".to_string()
+            }
+            McpError::ConsentUnavailable => {
+                "Cannot ask the user for consent: vaultic-mcp has no controlling terminal. \
+                 Ask the user to run it from a terminal, or start it with --no-consent in a trusted environment."
+                    .to_string()
             }
             McpError::AgentNotRunning => {
                 "The Vaultic agent is not running. Please ask the user to start it with `vaultic-agent start`."

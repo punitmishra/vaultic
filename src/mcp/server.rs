@@ -157,7 +157,9 @@ impl VaulticMcpServer {
             .map(|e| e.name.clone())
             .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
-        self.context.request_consent("get_password", &entry_name)?;
+        self.context
+            .request_consent("get_password", &entry_name)
+            .await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
@@ -194,7 +196,8 @@ impl VaulticMcpServer {
             .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
         self.context
-            .request_consent("get_credential", &entry_name)?;
+            .request_consent("get_credential", &entry_name)
+            .await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
@@ -233,7 +236,9 @@ impl VaulticMcpServer {
             .map(|e| e.name.clone())
             .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
-        self.context.request_consent("get_totp", &entry_name)?;
+        self.context
+            .request_consent("get_totp", &entry_name)
+            .await?;
 
         let totp = client.get_totp(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {

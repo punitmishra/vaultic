@@ -3,7 +3,8 @@
 //! Tools are the primary way AI assistants interact with Vaultic. Each tool
 //! maps to functionality in the vaultic-agent daemon.
 
-use std::io::{self, Write};
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::time::{Duration, Instant};
 
 use schemars::JsonSchema;
@@ -100,7 +101,26 @@ pub struct TotpResult {
     pub remaining_seconds: u32,
 }
 
+/// Result of asking the user for consent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsentOutcome {
+    /// The user approved access.
+    Granted,
+    /// The user explicitly declined.
+    Denied,
+    /// No controlling terminal was available to ask the user, so we could
+    /// not obtain consent. Callers fail closed.
+    Unavailable,
+}
+
 /// Handles user consent prompts for secret access.
+///
+/// The prompt is read from the controlling terminal (`/dev/tty`), **not**
+/// stdin: the MCP server owns stdin/stdout for the JSON-RPC protocol, so
+/// reading consent from stdin would steal protocol frames and corrupt the
+/// stream. When there is no controlling terminal (e.g. the server was
+/// launched by a GUI MCP host), consent is reported as `Unavailable` and the
+/// caller denies access rather than leaking a secret unprompted.
 pub struct ConsentHandler {
     require_consent: bool,
 }
@@ -110,36 +130,66 @@ impl ConsentHandler {
         Self { require_consent }
     }
 
-    /// Prompt user for consent to access a secret.
-    /// Returns true if access is granted, false if denied.
-    pub fn prompt(&self, action: &str, entry_name: &str) -> io::Result<bool> {
-        if !self.require_consent {
-            return Ok(true);
-        }
+    /// Whether consent is required at all (`--no-consent` sets this false).
+    pub fn is_required(&self) -> bool {
+        self.require_consent
+    }
 
-        // Write to stderr since stdout is used for MCP protocol
-        eprintln!();
-        eprintln!("┌─────────────────────────────────────────────────────────────┐");
-        eprintln!("│  VAULTIC: AI Credential Access Request                      │");
-        eprintln!("├─────────────────────────────────────────────────────────────┤");
-        eprintln!("│  Action: {:<50} │", action);
-        eprintln!("│  Entry:  {:<50} │", entry_name);
-        eprintln!("└─────────────────────────────────────────────────────────────┘");
-        eprint!("Allow access? [y/N]: ");
-        io::stderr().flush()?;
+    /// Prompt for consent on the controlling terminal. This performs blocking
+    /// terminal I/O, so async callers must run it via `spawn_blocking`.
+    pub fn prompt_on_tty(action: &str, entry_name: &str) -> ConsentOutcome {
+        // stdin/stdout are owned by the MCP transport — talk to the terminal
+        // directly. If there is no controlling terminal, we cannot ask.
+        let tty = match OpenOptions::new().read(true).write(true).open("/dev/tty") {
+            Ok(f) => f,
+            Err(_) => return ConsentOutcome::Unavailable,
+        };
+
+        let mut out = &tty;
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "┌─────────────────────────────────────────────────────────────┐"
+        );
+        let _ = writeln!(
+            out,
+            "│  VAULTIC: AI Credential Access Request                      │"
+        );
+        let _ = writeln!(
+            out,
+            "├─────────────────────────────────────────────────────────────┤"
+        );
+        let _ = writeln!(out, "│  Action: {:<50} │", action);
+        let _ = writeln!(out, "│  Entry:  {:<50} │", entry_name);
+        let _ = writeln!(
+            out,
+            "└─────────────────────────────────────────────────────────────┘"
+        );
+        let _ = write!(out, "Allow access? [y/N]: ");
+        let _ = out.flush();
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        let allowed = input.trim().eq_ignore_ascii_case("y");
-
-        if allowed {
-            eprintln!("✓ Access granted");
-        } else {
-            eprintln!("✗ Access denied");
+        let mut reader = BufReader::new(&tty);
+        if reader.read_line(&mut input).is_err() {
+            return ConsentOutcome::Unavailable;
         }
 
-        Ok(allowed)
+        let allowed = input.trim().eq_ignore_ascii_case("y");
+        let _ = writeln!(
+            out,
+            "{}",
+            if allowed {
+                "✓ Access granted"
+            } else {
+                "✗ Access denied"
+            }
+        );
+
+        if allowed {
+            ConsentOutcome::Granted
+        } else {
+            ConsentOutcome::Denied
+        }
     }
 }
 
@@ -210,15 +260,27 @@ impl ToolContext {
     }
 
     /// Request consent for secret access.
-    pub fn request_consent(&self, action: &str, entry_name: &str) -> Result<(), McpError> {
-        if !self
-            .consent
-            .prompt(action, entry_name)
-            .map_err(McpError::Io)?
-        {
-            return Err(McpError::ConsentDenied);
+    ///
+    /// Runs the blocking terminal prompt on a `spawn_blocking` thread so the
+    /// tokio runtime is never stalled. Fails closed (`ConsentUnavailable`) if
+    /// there is no controlling terminal to ask.
+    pub async fn request_consent(&self, action: &str, entry_name: &str) -> Result<(), McpError> {
+        if !self.consent.is_required() {
+            return Ok(());
         }
-        Ok(())
+
+        let action = action.to_string();
+        let entry = entry_name.to_string();
+        let outcome =
+            tokio::task::spawn_blocking(move || ConsentHandler::prompt_on_tty(&action, &entry))
+                .await
+                .map_err(|e| McpError::Io(std::io::Error::other(e.to_string())))?;
+
+        match outcome {
+            ConsentOutcome::Granted => Ok(()),
+            ConsentOutcome::Denied => Err(McpError::ConsentDenied),
+            ConsentOutcome::Unavailable => Err(McpError::ConsentUnavailable),
+        }
     }
 }
 
@@ -279,7 +341,14 @@ mod tests {
     #[test]
     fn test_consent_handler_disabled() {
         let handler = ConsentHandler::new(false);
-        // When consent is disabled, always returns true
-        assert!(handler.prompt("test", "entry").unwrap());
+        assert!(!handler.is_required());
+    }
+
+    #[tokio::test]
+    async fn consent_disabled_grants_without_tty() {
+        // With consent disabled, request_consent must succeed without ever
+        // touching /dev/tty (so it works in headless/test environments).
+        let ctx = ToolContext::new(false);
+        assert!(ctx.request_consent("get_password", "entry").await.is_ok());
     }
 }
