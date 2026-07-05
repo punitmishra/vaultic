@@ -16,8 +16,9 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::agent::paths::agent_socket_path;
-use crate::agent::protocol::ErrorCode;
+use crate::agent::protocol::{EntrySummary, ErrorCode};
 use crate::agent::{AgentClient, ClientError};
+use crate::mcp::config::McpConfig;
 use crate::mcp::error::McpError;
 use crate::mcp::tools::{
     CredentialResult, EntryInfo, GetCredentialParams, GetPasswordParams, GetTotpParams,
@@ -49,17 +50,17 @@ pub struct VaulticMcpServer {
 
 impl VaulticMcpServer {
     /// Create a new MCP server.
-    pub fn new(require_consent: bool) -> Self {
+    pub fn new(require_consent: bool, config: McpConfig) -> Self {
         Self {
-            context: Arc::new(ToolContext::new(require_consent)),
+            context: Arc::new(ToolContext::new(require_consent, config)),
             socket_path: None,
         }
     }
 
     /// Create a new MCP server with a custom socket path.
-    pub fn with_socket_path(require_consent: bool, socket_path: String) -> Self {
+    pub fn with_socket_path(require_consent: bool, socket_path: String, config: McpConfig) -> Self {
         Self {
-            context: Arc::new(ToolContext::new(require_consent)),
+            context: Arc::new(ToolContext::new(require_consent, config)),
             socket_path: Some(socket_path),
         }
     }
@@ -128,16 +129,16 @@ impl VaulticMcpServer {
         Ok(entries.into_iter().map(EntryInfo::from).collect())
     }
 
-    /// Resolve an entry by ID or name. Returns the id plus the entry's name
-    /// when it is known for free (the name-based path already fetched the
-    /// matching summary); the id-based path returns `None` since a raw UUID
-    /// carries no name.
+    /// Resolve an entry by ID or name. Returns the id plus the matching
+    /// summary when it is known for free (the name-based path already fetched
+    /// it); the id-based path returns `None` since a raw UUID carries no
+    /// metadata.
     async fn resolve_entry(
         &self,
         client: &mut AgentClient,
         entry_id: Option<String>,
         name: Option<String>,
-    ) -> Result<(Uuid, Option<String>), McpError> {
+    ) -> Result<(Uuid, Option<EntrySummary>), McpError> {
         if let Some(id_str) = entry_id {
             let id = Uuid::parse_str(&id_str)
                 .map_err(|_| McpError::InvalidParams(format!("Invalid UUID: {}", id_str)))?;
@@ -145,7 +146,7 @@ impl VaulticMcpServer {
         } else if let Some(name) = name {
             let entries = client.search(name.clone()).await?;
             let matched = entries.into_iter().next().ok_or(McpError::NotFound(name))?;
-            Ok((matched.id, Some(matched.name)))
+            Ok((matched.id, Some(matched)))
         } else {
             Err(McpError::InvalidParams(
                 "Either entry_id or name must be provided".to_string(),
@@ -153,39 +154,42 @@ impl VaulticMcpServer {
         }
     }
 
-    /// Resolve an entry and a human-readable name for the consent prompt, in
-    /// as few round-trips as possible. The name-based path already has the
-    /// name; only the id-based path pays for a single `list_summary` lookup
-    /// (falling back to the raw id if that fails).
+    /// Resolve an entry to its id, display name, and tags for the consent
+    /// decision, in as few round-trips as possible. The name-based path
+    /// already has the summary; only the id-based path pays for a single
+    /// `list_summary` lookup (falling back to the raw id / no tags if that
+    /// fails). Tags feed the consent-policy auto-approve check.
     async fn resolve_for_consent(
         &self,
         client: &mut AgentClient,
         entry_id: Option<String>,
         name: Option<String>,
-    ) -> Result<(Uuid, String), McpError> {
-        let (id, resolved_name) = self.resolve_entry(client, entry_id, name.clone()).await?;
-        let display = match resolved_name {
-            Some(n) => n,
-            None => client
+    ) -> Result<(Uuid, String, Vec<String>), McpError> {
+        let (id, summary) = self.resolve_entry(client, entry_id, name.clone()).await?;
+        let (display, tags) = match summary {
+            Some(s) => (s.name, s.tags),
+            None => match client
                 .list_summary()
                 .await
                 .ok()
-                .and_then(|es| es.into_iter().find(|e| e.id == id).map(|e| e.name))
-                .or(name)
-                .unwrap_or_else(|| id.to_string()),
+                .and_then(|es| es.into_iter().find(|e| e.id == id))
+            {
+                Some(e) => (e.name, e.tags),
+                None => (name.unwrap_or_else(|| id.to_string()), Vec::new()),
+            },
         };
-        Ok((id, display))
+        Ok((id, display, tags))
     }
 
     /// Execute get_password tool.
     async fn get_password(&self, params: GetPasswordParams) -> Result<String, McpError> {
         let mut client = self.get_client().await?;
-        let (id, entry_name) = self
+        let (id, entry_name, entry_tags) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
         self.context
-            .request_consent("get_password", &entry_name)
+            .request_consent("get_password", &entry_name, &entry_tags)
             .await?;
 
         // Consume a rate-limit token only for a consented disclosure — not for
@@ -213,12 +217,12 @@ impl VaulticMcpServer {
         params: GetCredentialParams,
     ) -> Result<CredentialResult, McpError> {
         let mut client = self.get_client().await?;
-        let (id, entry_name) = self
+        let (id, entry_name, entry_tags) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
         self.context
-            .request_consent("get_credential", &entry_name)
+            .request_consent("get_credential", &entry_name, &entry_tags)
             .await?;
 
         // Consume a rate-limit token only for a consented disclosure — not for
@@ -249,12 +253,12 @@ impl VaulticMcpServer {
     /// Execute get_totp tool.
     async fn get_totp(&self, params: GetTotpParams) -> Result<TotpResult, McpError> {
         let mut client = self.get_client().await?;
-        let (id, entry_name) = self
+        let (id, entry_name, entry_tags) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
         self.context
-            .request_consent("get_totp", &entry_name)
+            .request_consent("get_totp", &entry_name, &entry_tags)
             .await?;
 
         // Consume a rate-limit token only for a consented disclosure — not for
@@ -505,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_server_info() {
-        let server = VaulticMcpServer::new(false);
+        let server = VaulticMcpServer::new(false, McpConfig::default());
         let info = server.get_info();
         assert_eq!(info.server_info.name, "vaultic-mcp");
     }

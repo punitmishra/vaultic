@@ -26,6 +26,15 @@ user pasting secrets into chat.
   `src/bin/vaultic_mcp.rs`. Documented in
   [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
 
+### Added — MCP consent-policy config
+
+- A `vaultic-mcp` config (`~/.config/vaultic/mcp.toml`, or `--config <path>`)
+  pre-authorizes specific entries for secret access without an interactive
+  prompt, via `[consent] auto_approve_names` (case-insensitive exact) and
+  `auto_approve_tags`. This is the practical path to using `vaultic-mcp` from
+  a no-TTY GUI host. Empty/absent config = unchanged behavior; auto-approved
+  disclosures are logged to stderr. New module `src/mcp/config.rs`.
+
 ### Fixed — MCP correctness pass
 
 A review of the new `vaultic-mcp` server found and fixed five bugs before

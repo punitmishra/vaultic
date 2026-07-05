@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::agent::protocol::EntrySummary;
+use crate::mcp::config::McpConfig;
 use crate::mcp::error::McpError;
 
 /// Parameters for list_entries tool.
@@ -240,13 +241,15 @@ impl Default for RateLimiter {
 pub struct ToolContext {
     pub consent: ConsentHandler,
     pub rate_limiter: Mutex<RateLimiter>,
+    pub config: McpConfig,
 }
 
 impl ToolContext {
-    pub fn new(require_consent: bool) -> Self {
+    pub fn new(require_consent: bool, config: McpConfig) -> Self {
         Self {
             consent: ConsentHandler::new(require_consent),
             rate_limiter: Mutex::new(RateLimiter::default()),
+            config,
         }
     }
 
@@ -261,11 +264,28 @@ impl ToolContext {
 
     /// Request consent for secret access.
     ///
-    /// Runs the blocking terminal prompt on a `spawn_blocking` thread so the
-    /// tokio runtime is never stalled. Fails closed (`ConsentUnavailable`) if
-    /// there is no controlling terminal to ask.
-    pub async fn request_consent(&self, action: &str, entry_name: &str) -> Result<(), McpError> {
+    /// Order of decision:
+    /// 1. `--no-consent` → always granted.
+    /// 2. Entry pre-authorized by the consent-policy config (by name or tag) →
+    ///    granted without a prompt, logged to stderr for visibility.
+    /// 3. Otherwise prompt on the controlling terminal via `spawn_blocking`
+    ///    (so the tokio runtime is never stalled), failing closed
+    ///    (`ConsentUnavailable`) if there is no terminal to ask.
+    pub async fn request_consent(
+        &self,
+        action: &str,
+        entry_name: &str,
+        entry_tags: &[String],
+    ) -> Result<(), McpError> {
         if !self.consent.is_required() {
+            return Ok(());
+        }
+
+        if self.config.is_auto_approved(entry_name, entry_tags) {
+            eprintln!(
+                "vaultic-mcp: auto-approved {} for '{}' (consent-policy config)",
+                action, entry_name
+            );
             return Ok(());
         }
 
@@ -348,7 +368,28 @@ mod tests {
     async fn consent_disabled_grants_without_tty() {
         // With consent disabled, request_consent must succeed without ever
         // touching /dev/tty (so it works in headless/test environments).
-        let ctx = ToolContext::new(false);
-        assert!(ctx.request_consent("get_password", "entry").await.is_ok());
+        let ctx = ToolContext::new(false, McpConfig::default());
+        assert!(ctx
+            .request_consent("get_password", "entry", &[])
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn consent_auto_approved_by_config_grants_without_tty() {
+        // An entry pre-authorized in the consent-policy config is granted
+        // without prompting — the path that makes GUI/no-TTY hosts usable.
+        let config: McpConfig = toml::from_str(
+            r#"
+            [consent]
+            auto_approve_tags = ["ai-ok"]
+            "#,
+        )
+        .unwrap();
+        let ctx = ToolContext::new(true, config);
+        assert!(ctx
+            .request_consent("get_password", "GitHub", &["ai-ok".to_string()])
+            .await
+            .is_ok());
     }
 }

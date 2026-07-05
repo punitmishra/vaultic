@@ -57,13 +57,21 @@ fails closed without one), locked-vault errors were mislabeled (now surface
 `VaultLocked` with the "run `vaultic unlock`" hint), the rate limiter
 charged for denials/not-founds (now counts only consented disclosures),
 malformed tool args silently defaulted (now rejected), and a redundant
-`list_summary` round-trip per secret fetch (now removed). What's next:
+`list_summary` round-trip per secret fetch (now removed).
+
+**Shipped since:** a consent-policy config (`~/.config/vaultic/mcp.toml` /
+`--config`) with `auto_approve_names` + `auto_approve_tags`, so specific
+entries can be pre-authorized without an interactive prompt — the pragmatic
+path to using `vaultic-mcp` from a no-TTY GUI host. Auto-approved
+disclosures are logged to stderr; empty config = unchanged behavior.
+
+What's next:
 
 | Track | Summary |
 |---|---|
-| Consent for non-TTY hosts | The `/dev/tty` fix works when `vaultic-mcp` is launched from a terminal; GUI MCP hosts (Claude Desktop) have no TTY, so secret tools fail closed. Add a protocol-native approval path (MCP **elicitation** back to the client), and/or agent-side approval (the GUI/desktop app prompts), and/or a pre-authorized per-entry allowlist. This is the headline MCP feature for after v2.3.0. |
-| Audit log of MCP accesses | Optionally record which entries were disclosed to which client and when, so a user can review AI credential access. Ties into the daemon's (currently absent) access log — design where the log lives and who can read it. |
-| Per-tool / per-entry allowlists + config file | A `vaultic-mcp` config (tags/folders an AI may read, tools it may call, auto-approve lists) so consent can be scoped rather than all-or-`--no-consent`. |
+| Protocol-native consent (MCP elicitation) | The nicer answer to non-TTY hosts than the config allowlist: send an approval request back to the MCP client so it renders the prompt. **Blocked on an rmcp upgrade** — the pinned `rmcp 0.1.5` has no elicitation/server-request API; moving to `rmcp` 1.x is a real API migration (the server surface changed substantially). Track as its own workstream. |
+| Audit log of MCP accesses | Persist which entries were disclosed to which client and when (today auto-approvals log to stderr only), so a user can review AI credential access. Ties into the daemon's (currently absent) access log — design where the log lives and who can read it. |
+| Richer consent policy | Extend the config beyond auto-approve: per-tool allowlists (which tools a client may call), folder scoping, and glob/deny rules, so access can be shaped rather than all-or-`--no-consent`. |
 | Write tools behind stronger gating | `add`/`edit`/`generate` exposed to AI clients would be powerful but higher-risk; only behind explicit config + per-call consent, never in `--no-consent`. |
 
 ### Feature completions

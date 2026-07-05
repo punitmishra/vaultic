@@ -120,9 +120,38 @@ Type `y` to approve or `n` (or just press Enter) to deny.
 > **No terminal?** Consent needs a controlling terminal because stdin/stdout
 > are reserved for the MCP protocol. If you launch `vaultic-mcp` from a GUI
 > MCP host (no TTY), secret tools fail closed with a "consent unavailable"
-> error. Either launch it from a terminal, or run it with `--no-consent` in a
-> trusted environment. A protocol-native approval flow (MCP elicitation) is on
-> the roadmap — see [`ROADMAP.md`](../ROADMAP.md).
+> error — unless the entry is pre-authorized in the consent-policy config
+> (below). Otherwise launch it from a terminal or run it with `--no-consent`
+> in a trusted environment. A protocol-native approval flow (MCP elicitation)
+> is on the roadmap — see [`ROADMAP.md`](../ROADMAP.md).
+
+### Pre-authorizing entries (consent policy)
+
+For unattended or GUI-host use, you can pre-authorize specific entries so the
+AI may read them without an interactive prompt. Create a TOML config at
+`~/.config/vaultic/mcp.toml` (or pass `--config <path>`):
+
+```toml
+[consent]
+# Entry names (case-insensitive, exact match) the AI may read without a prompt.
+auto_approve_names = ["GitHub CI", "Deploy Bot"]
+# Any entry carrying one of these tags is auto-approved.
+auto_approve_tags = ["ai-ok", "automation"]
+```
+
+- With **no config** (the default), nothing is pre-authorized — every secret
+  access prompts on the terminal, or fails closed without one.
+- A matching entry is granted **without a prompt**, and the disclosure is
+  logged to stderr (`auto-approved get_password for 'GitHub CI' ...`) so you
+  can see what the AI accessed.
+- Non-matching entries still prompt (or fail closed).
+- `--no-consent` overrides everything and approves all access; don't combine
+  it with untrusted clients.
+
+**Security tradeoff:** auto-approve swaps the per-use prompt for standing
+authorization. Only list entries you're comfortable an AI reading unattended —
+tag the handful of CI/automation credentials you want exposed (e.g. `ai-ok`)
+and leave everything else prompt-gated.
 
 ## Usage Examples
 
@@ -159,6 +188,7 @@ vaultic-mcp [OPTIONS]
 Options:
       --no-consent       Disable user consent prompts (WARNING: use only in trusted environments)
       --socket <PATH>    Custom socket path for vaultic-agent
+      --config <PATH>    Consent-policy config (TOML); defaults to ~/.config/vaultic/mcp.toml if present
   -v, --verbose          Enable debug logging to stderr
   -h, --help             Print help
   -V, --version          Print version

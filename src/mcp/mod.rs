@@ -13,13 +13,16 @@
 //! # Security Model
 //!
 //! - Vault must be pre-unlocked via `vaultic unlock` (no password over MCP)
-//! - Secret-access tools require user consent (prompted on stderr)
+//! - Secret-access tools require user consent (prompted on the controlling
+//!   terminal), or pre-authorization via the optional consent-policy config
 //! - All credentials stay local (never sent to AI servers)
 //! - Rate limiting prevents credential enumeration
 
+pub mod config;
 pub mod error;
 pub mod server;
 pub mod tools;
 
+pub use config::McpConfig;
 pub use error::McpError;
 pub use server::VaulticMcpServer;
