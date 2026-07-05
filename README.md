@@ -1,8 +1,8 @@
 # Vaultic
 
-A local-first password manager written in Rust. CLI, TUI, optional
-`ssh-agent`-style daemon, and a desktop GUI — all sharing one
-on-disk vault. No cloud, no servers, no telemetry.
+A **local-first, encrypted password manager** in Rust. No cloud, no account, no telemetry.
+Your vault is a directory of encrypted files on your machine — CLI, TUI, daemon, GUI, and
+MCP server all sharing one on-disk format.
 
 ```
  ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗██╗ ██████╗
@@ -15,16 +15,41 @@ on-disk vault. No cloud, no servers, no telemetry.
    Local-first  ·  Hardware-backed  ·  Yours, on disk
 ```
 
-## Three binaries
+## Quick Install
 
-Vaultic 2.2 ships three programs that share one library and one
+```bash
+# Homebrew (macOS/Linux)
+brew tap punitmishra/vaultic && brew install vaultic
+
+# From source
+cargo install --git https://github.com/punitmishra/vaultic
+
+# Then:
+vaultic init -n "My Vault"
+vaultic unlock
+```
+
+## Security
+
+**Argon2id** key derivation (64 MB default), **XChaCha20-Poly1305** authenticated encryption,
+**X25519** key exchange for sharing. All crypto from vetted Rust crates (`argon2`, `chacha20poly1305`,
+`x25519-dalek`) — **no home-rolled cryptography**.
+
+- **Threat model**: [`SECURITY.md`](SECURITY.md) — what we defend against and what's out of scope
+- **Report vulnerabilities**: [GitHub Security Advisories](https://github.com/punitmishra/vaultic/security/advisories/new)
+- **License**: MIT
+
+## Four binaries
+
+Vaultic 2.2 ships four programs that share one library and one
 on-disk vault format:
 
 | Binary | What it does |
 |---|---|
 | `vaultic` | The CLI + TUI. Original surface — init, unlock, add, list, search, import/export, recovery key, sharing, TOTP, and a full-screen ratatui mode (`vaultic tui`). When `vaultic-agent` is running and unlocked for the active vault, list/get/search/totp automatically route through it instead of opening the on-disk vault directly. |
-| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves the CLI and GUI over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
+| `vaultic-agent` | A long-running Unix-socket daemon, like `ssh-agent`. Holds an unlocked vault key in memory; serves the CLI, GUI, and MCP server over a typed JSON-over-Unix-socket protocol. Peer-credential auth, 15-minute inactivity lock, graceful shutdown. |
 | `vaultic-gui` | An [eframe](https://github.com/emilk/egui)/egui desktop app. Talks to `vaultic-agent`. Unlock screen, entry list with fuzzy search, detail view, live TOTP codes, four built-in themes, vim-style keyboard nav, 30-second clipboard auto-clear. Runs Argon2id locally so the password never leaves the GUI process. |
+| `vaultic-mcp` | [Model Context Protocol](https://modelcontextprotocol.io/) server for AI tool integration. Lets Claude Code and other MCP-compatible assistants securely access vault credentials without pasting secrets in chat. User consent prompts, rate limiting, all credentials stay local. See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md). |
 
 Wire format and threat model for the agent ↔ client conversation are
 documented in [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md). The

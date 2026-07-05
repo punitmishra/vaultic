@@ -14,27 +14,28 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: v2.1.0 (daemon + GUI + dep hardening)
+## Current Status: v2.2.0 (daemon + GUI + MCP + dep hardening)
 
-### Checkpoint: 2026-05-23
+### Checkpoint: 2026-06-29
 
-**Build Status**: COMPILING AND RUNNING (three binaries)
-**Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app)
+**Build Status**: COMPILING AND RUNNING (four binaries)
+**Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app), `vaultic-mcp` (MCP server)
 **Tests**: 359 passing (lib + bin + integration + doc)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED + 4 themes (default/dracula/solarized-dark/monochrome)
 **GUI**: FULLY IMPLEMENTED — unlock + list + detail + live TOTP + 4 themes + keyboard nav
 **Daemon**: FULLY IMPLEMENTED — Unix socket, peer-cred auth, 9 protocol methods, inactivity lock
+**MCP**: FULLY IMPLEMENTED — Model Context Protocol server for AI tool integration
 **Benchmarks**: `cargo bench --bench vault_ops` covers list/search/get/add/unlock against 10k entries
 **Audit**: `cargo audit` reports 1 vuln (gpg-feature-only) + 4 unmaintained warnings
 **CI/CD**: GitHub Actions configured; currently billing-locked (issue #8)
-**Documentation**: CHANGELOG.md, slim ROADMAP.md, AGENT_PROTOCOL.md, comprehensive CLAUDE.md
+**Documentation**: CHANGELOG.md, slim ROADMAP.md, AGENT_PROTOCOL.md, MCP_SERVER.md, comprehensive CLAUDE.md
 **GitHub**: https://github.com/punitmishra/vaultic
 **Active issues**: #6 deps hardening (Phase B remains), #8 CI billing
 
 ```bash
 # Verify everything works
-cargo build --release        # Builds three binaries
+cargo build --release        # Builds four binaries
 cargo test --release         # 359 passing
 
 # CLI
@@ -49,6 +50,11 @@ cargo test --release         # 359 passing
 ./target/release/vaultic-gui                          # Default theme
 ./target/release/vaultic-gui --theme dracula          # Or any of 4 named themes
 ./target/release/vaultic-gui --socket /custom/path.sock
+
+# MCP Server (for AI tool integration)
+./target/release/vaultic-mcp              # Starts MCP server over stdio
+./target/release/vaultic-mcp --verbose    # With debug logging
+./target/release/vaultic-mcp --no-consent # Skip consent prompts (trusted env only)
 
 # Verify everything works (CLI side)
 
@@ -121,7 +127,48 @@ cargo test --release         # 359 passing
 | `import` | COMPLETE | ~250 | Bitwarden, LastPass, 1Password |
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
 | `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
+| `mcp` | NEW | ~500 | Model Context Protocol server for AI tool integration |
 | `tests` | COMPLETE | ~900 | 291 tests (unit, integration, doctests) |
+
+---
+
+## MCP Server Implementation Details
+
+The MCP server (`src/mcp/`) enables AI assistants to access vault credentials securely.
+
+### Architecture
+```
+Claude Code ──(MCP/stdio)──► vaultic-mcp ──(Unix socket)──► vaultic-agent ──► Vault
+```
+
+### Tools Exposed
+| Tool | Consent | Description |
+|------|---------|-------------|
+| `vault_status` | No | Check lock state, entry count, session expiry |
+| `list_entries` | No | List entries without secrets |
+| `search_entries` | No | Fuzzy search by name/username/URL/tags |
+| `get_password` | Yes | Retrieve password |
+| `get_credential` | Yes | Get username + password + URL |
+| `get_totp` | Yes | Get current TOTP code |
+
+### Security Features
+- User consent prompts on stderr for secret access
+- Rate limiting (10 requests/minute)
+- Vault must be pre-unlocked via CLI
+- All credentials stay local
+
+### Claude Code Configuration
+```json
+{
+  "mcpServers": {
+    "vaultic": {
+      "command": "vaultic-mcp"
+    }
+  }
+}
+```
+
+See `docs/MCP_SERVER.md` for full documentation.
 
 ---
 
@@ -267,6 +314,11 @@ src/
 ├── storage/
 │   ├── mod.rs        # Sled DB operations
 │   └── keyring.rs    # Keyring persistence
+├── mcp/
+│   ├── mod.rs        # MCP module root
+│   ├── server.rs     # ServerHandler implementation
+│   ├── tools.rs      # Tool definitions, consent, rate limiting
+│   └── error.rs      # MCP-specific errors
 ├── migration/mod.rs  # V1 to V2 migration
 ├── session/mod.rs    # Session management
 ├── models/mod.rs     # Data structures
@@ -277,6 +329,14 @@ src/
 ├── fido2/mod.rs      # Hardware auth
 ├── import.rs         # Import parsers
 └── export.rs         # Export writers
+```
+
+### Binaries
+```
+src/bin/
+├── vaultic_agent.rs  # Daemon binary
+├── vaultic_gui.rs    # GUI binary
+└── vaultic_mcp.rs    # MCP server binary
 ```
 
 ### Additional Files
@@ -433,6 +493,14 @@ rm -rf /tmp/test_vault
 22. **TOTP QR Scanning** - Scan PNG/JPEG QR codes for otpauth URIs, `totp scan`/`totp show` commands
 23. **TOTP on Add** - `--totp-secret` and `--totp-uri` flags on `add` command
 24. **TOTP Display** - TOTP codes shown in `display_entry` with countdown bar
+25. **MCP Server** - `vaultic-mcp` for AI tool integration (Claude Code, etc.)
+
+### MCP Notes
+- MCP server communicates with vaultic-agent over Unix socket
+- User consent prompts on stderr for secret-access tools
+- Rate limited to 10 credential requests per minute
+- Configure in Claude Code with `{"mcpServers": {"vaultic": {"command": "vaultic-mcp"}}}`
+- See `docs/MCP_SERVER.md` for full documentation
 
 ### TUI Notes
 - TUI requires unlocked vault (loads session + master key)

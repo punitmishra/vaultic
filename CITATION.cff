@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Vaultic"
+abstract: "A local-first, encrypted password manager written in Rust. No cloud, no account, no telemetry."
+authors:
+  - family-names: "Mishra"
+    given-names: "Punit"
+    orcid: ""
+repository-code: "https://github.com/punitmishra/vaultic"
+url: "https://github.com/punitmishra/vaultic"
+license: MIT
+version: "2.2.0"
+date-released: "2026-06-29"
+keywords:
+  - password-manager
+  - security
+  - rust
+  - encryption
+  - local-first
+  - cli
+  - fido2
