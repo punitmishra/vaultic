@@ -32,9 +32,9 @@ are unsupported.
 
 | Version | Supported |
 |---------|-----------|
-| 2.1.x   | ✅ Yes    |
-| 2.0.x   | ⚠️ Critical fixes only |
-| < 2.0   | ❌ No     |
+| 2.2.x   | ✅ Yes    |
+| 2.1.x   | ⚠️ Critical fixes only |
+| < 2.1   | ❌ No     |
 
 ## Threat model (in scope)
 
@@ -60,6 +60,13 @@ What we defend against:
   user's password. Clients (CLI, GUI) run Argon2id **locally** and send only
   the 32-byte derived key. See `docs/AGENT_PROTOCOL.md` § Authentication for
   the rationale.
+- **AI clients over-reaching (`vaultic-mcp`).** The MCP server never unlocks
+  the vault itself — it requires a vault already unlocked via `vaultic
+  unlock`, and it inherits the agent's same-UID socket protection. Every
+  secret-returning tool (`get_password`, `get_credential`, `get_totp`)
+  prompts for explicit consent on stderr and is rate-limited (10/min), so a
+  connected AI can't silently enumerate credentials. Secrets are returned to
+  the local MCP client only; the server sends nothing to remote AI services.
 - **Malformed wire frames.** Frames are length-prefixed and capped at 1 MiB.
   Oversized or invalid frames close the connection without resource use.
 - **Memory hygiene at rest.** Sensitive in-memory values
@@ -89,13 +96,17 @@ the threat model:
 
 ## Known unfixed issues
 
-- **`--features gpg`** pulls in `sequoia-openpgp 1.x`, which currently has
-  an open RUSTSEC advisory. The GPG path is **off by default** and only
-  used by users who explicitly opt in. We track upstream and will bump as
-  soon as a clean release ships.
 - **Windows** is not supported in v1 (no named-pipe transport, no peer-cred
   equivalent yet). Don't run the daemon on Windows expecting the same
   guarantees.
+- **Master key is not `mlock`'d.** Under memory pressure the daemon's key
+  region may swap to disk. Tracked in
+  [#24](https://github.com/punitmishra/vaultic/issues/24).
+
+> The `sequoia-openpgp 1.x` advisory (RUSTSEC-2025-0136) that used to be
+> listed here was cleared by the 2.3 bump in
+> [#42](https://github.com/punitmishra/vaultic/pull/42). The `gpg` feature
+> remains off by default.
 
 ## Cryptography
 

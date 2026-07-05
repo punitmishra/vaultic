@@ -1,7 +1,7 @@
 # Vaultic Architecture
 
 This is a contributor-oriented overview of how Vaultic is laid out as
-of v2.1.0. It complements:
+of v2.2.0. It complements:
 
 - [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md) — wire format and threat
   model for the daemon ↔ client conversation
@@ -12,26 +12,26 @@ of v2.1.0. It complements:
 
 ## At a glance
 
-Vaultic is one Rust crate that produces three binaries plus a
+Vaultic is one Rust crate that produces four binaries plus a
 reusable library surface. Everything reads and writes the same
 on-disk vault format.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                         Three binaries                           │
+│                          Four binaries                           │
 │                                                                  │
-│   vaultic              vaultic-agent          vaultic-gui        │
-│   (CLI + TUI)          (Unix-socket daemon)   (eframe / egui)    │
-│        │                      │                      │           │
-│        │                      └──── peer-cred ──────►│           │
-│        │                            JSON over UDS    │           │
-│        │                                             │           │
-│        ▼                      ▼                      ▼           │
+│   vaultic        vaultic-gui      vaultic-mcp     vaultic-agent  │
+│   (CLI + TUI)    (eframe/egui)    (MCP server)    (UDS daemon)   │
+│        │              │                │                │        │
+│        │              └── peer-cred ───┼── JSON/UDS ────►│        │
+│        │                  (GUI, MCP, and CLI are all     │        │
+│        │                   agent clients)                │        │
+│        ▼                                                 ▼        │
 │   ┌──────────────────────────────────────────────────────┐       │
 │   │                    vaultic library                    │       │
 │   │                                                       │       │
 │   │   crypto    storage    models    agent    gui  tui   │       │
-│   │   sharing   recovery   migration totp     ai   ...   │       │
+│   │   sharing   recovery   migration totp     ai   mcp   │       │
 │   └──────────────────────────────────────────────────────┘       │
 │                                │                                 │
 │                                ▼                                 │
@@ -45,7 +45,7 @@ on-disk vault format.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## The three binaries
+## The four binaries
 
 ### `vaultic` (CLI + TUI)
 
@@ -87,6 +87,25 @@ directly; everything goes through the daemon's typed protocol.
 - Tokio worker bridging egui ↔ agent: `src/gui/worker.rs`
 - Theme system: `src/gui/theme.rs` (mirrors `src/tui/theme.rs` by
   name; different style data)
+
+### `vaultic-mcp` (MCP server)
+
+A [Model Context Protocol](https://modelcontextprotocol.io/) server
+that exposes the vault to AI clients (Claude Code, etc.) over stdio.
+Like the GUI, it's an agent client — it never opens the vault
+directly; every operation goes through the daemon's typed protocol.
+
+- Entry point: `src/bin/vaultic_mcp.rs`
+- Server + tool dispatch: `src/mcp/server.rs` (implements `rmcp`'s
+  `ServerHandler`; maps each MCP tool call to an `AgentClient` call)
+- Tool params, consent handler, rate limiter: `src/mcp/tools.rs`
+- MCP-specific errors (AI-friendly messages): `src/mcp/error.rs`
+
+Six tools: `vault_status`, `list_entries`, `search_entries` (no
+consent) and `get_password`, `get_credential`, `get_totp` (explicit
+stderr consent + 10/min rate limit). The vault must be unlocked via
+`vaultic unlock` first; the MCP server does not take a password. Full
+detail in [`../docs/MCP_SERVER.md`](MCP_SERVER.md).
 
 ## Reusable library surface
 
@@ -175,22 +194,21 @@ in the worker pumps them into tokio mpsc.
 | `tests/agent_integration.rs` | Spins up `vaultic-agent` on a temp socket against a fixture vault and exercises every protocol method through real Unix-socket frames |
 | `benches/vault_ops.rs` | Criterion benchmarks for list / search / get / add / unlock against a 10k-entry vault |
 
-`cargo test --release` runs everything except benches. Total: 359
-tests as of v2.1.0.
+`cargo test --release` runs everything except benches. Total: 439
+tests as of v2.2.0.
 
 ## Known seams (for future contributors)
 
-- **CLI ↔ daemon are not bridged.** `vaultic unlock` (CLI) writes a
-  session file; `Method::Unlock` (daemon) keeps state in memory.
-  Bridging is a deliberate future workstream.
 - **Daemon is Unix-only.** Windows would need a named-pipe transport
-  and a different peer-cred mechanism.
+  and a different peer-cred mechanism. `vaultic-mcp` inherits this —
+  it's a client of the Unix-socket daemon.
 - **GPG support is feature-gated.** `--features gpg` pulls in
-  `sequoia-openpgp 1.x`, which has a known advisory. Bumping to
-  `2.x` is a real API migration; not yet done.
+  `sequoia-openpgp 2.x` (bumped from 1.x in #42, clearing
+  RUSTSEC-2025-0136). Off by default.
 - **No daemonization or service-manager integration.** Users start
   `vaultic-agent` themselves; launchd / systemd integration is on
-  the roadmap.
+  the roadmap ([#22](https://github.com/punitmishra/vaultic/issues/22))
+  and would also make `vaultic-mcp` reliably available to AI clients.
 - **Master key is not mlock'd.** Could swap to disk under memory
   pressure. Possible follow-up.
 - **No audit log.** The daemon doesn't record which entries were

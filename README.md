@@ -158,14 +158,27 @@ When `vaultic-agent` is running and unlocked for the active vault:
   `solarized-dark`, `monochrome`. Hot-swappable.
 - Vim-style keyboard nav: `j` / `k` / arrows / `/` / `Esc`
 
+#### AI tool integration (`vaultic-mcp`)
+- [Model Context Protocol](https://modelcontextprotocol.io/) server so
+  Claude Code and other MCP clients can read credentials without you
+  pasting secrets into a chat
+- Talks to `vaultic-agent` over its Unix socket — the vault must be
+  unlocked via `vaultic unlock` first; no password ever crosses MCP
+- Secret-returning tools (`get_password`, `get_credential`, `get_totp`)
+  prompt for **explicit consent on stderr**; read-only tools
+  (`vault_status`, `list_entries`, `search_entries`) don't
+- Rate-limited to 10 credential requests/minute; all secrets stay local
+- See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for setup
+
 #### Pending / experimental
 - **FIDO2 / YubiKey** — code structure in place (`--features fido2`),
   needs real hardware to test the unlock flow
-- **GPG support** — code structure in place (`--features gpg`),
-  pinned to `sequoia-openpgp 1.x`. The crate has a known advisory
-  ([RUSTSEC-2025-0136](https://rustsec.org/advisories/RUSTSEC-2025-0136))
-  in 1.x; bumping to 2.x is non-trivial API work. Default builds
-  don't include this feature.
+- **GPG support** — code structure in place (`--features gpg`), on
+  `sequoia-openpgp 2.x` (the 1.x advisory
+  [RUSTSEC-2025-0136](https://rustsec.org/advisories/RUSTSEC-2025-0136)
+  was cleared by the 2.3 bump in
+  [#42](https://github.com/punitmishra/vaultic/pull/42)). Off by
+  default; opt in with `--features gpg`.
 
 ---
 
@@ -251,7 +264,7 @@ vaultic lock
 ### Run the daemon + GUI
 
 ```bash
-# Build everything (three binaries)
+# Build everything (four binaries)
 cargo build --release
 
 # Start the agent in one terminal (foreground; SIGINT to stop)
@@ -274,12 +287,38 @@ cargo build --release
 ./target/release/vaultic-agent stop
 ```
 
-The agent, GUI, and CLI use the same on-disk vault. As of the
-`[Unreleased]` line, unlock/lock state is bridged: `vaultic unlock`
-notifies a running agent, `vaultic lock` clears it, and the CLI's
-`list`/`get`/`search`/`totp show` commands route through the agent
-when one is available. See [`CHANGELOG.md`](CHANGELOG.md) for the
-exact rollout (PRs #29/#30/#31).
+The agent, GUI, and CLI use the same on-disk vault. Unlock/lock state
+is bridged (shipped in 2.2.0): `vaultic unlock` notifies a running
+agent, `vaultic lock` clears it, and the CLI's `list`/`get`/`search`/
+`totp show` commands route through the agent when one is available.
+See [`CHANGELOG.md`](CHANGELOG.md) for the exact rollout (PRs
+#29/#30/#31).
+
+### Let an AI assistant use your vault (MCP)
+
+`vaultic-mcp` exposes the vault to [MCP](https://modelcontextprotocol.io/)
+clients like Claude Code, so the assistant can pull a credential
+instead of you pasting it into chat. The vault must already be
+unlocked, and every secret access asks for your consent.
+
+```bash
+# 1. Unlock the vault and start the agent (see above)
+vaultic unlock
+./target/release/vaultic-agent start &
+
+# 2. Register the MCP server with your client. For Claude Code,
+#    add this to ~/.claude/settings.json:
+#
+#      { "mcpServers": { "vaultic": { "command": "vaultic-mcp" } } }
+#
+#    Then ask: "What's my vault status?" or "Get my GitHub password."
+#    Secret requests prompt for y/N consent on the terminal.
+```
+
+Read-only tools (`vault_status`, `list_entries`, `search_entries`)
+need no consent; `get_password`, `get_credential`, and `get_totp`
+prompt every time and are rate-limited. Full setup and the security
+model are in [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
 
 ---
 
@@ -571,9 +610,10 @@ vaultic tui
 
 ## Architecture
 
-Vaultic ships three binaries — `vaultic` (CLI/TUI), `vaultic-agent`
-(Unix-socket daemon), and `vaultic-gui` (eframe app) — that all
-share one library and one on-disk vault format.
+Vaultic ships four binaries — `vaultic` (CLI/TUI), `vaultic-agent`
+(Unix-socket daemon), `vaultic-gui` (eframe app), and `vaultic-mcp`
+(MCP server for AI clients) — that all share one library and one
+on-disk vault format.
 
 For a contributor-oriented overview of how the pieces fit together
 (component diagram, threading model, where to find each module,
@@ -650,6 +690,7 @@ cargo clippy
 - [`ROADMAP.md`](ROADMAP.md) — what's planned, what's in flight
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — component layout
 - [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) — daemon wire protocol + threat model
+- [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — MCP server setup, tools, and consent model
 
 ---
 

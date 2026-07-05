@@ -7,8 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — MCP server (`vaultic-mcp`) ([#43](https://github.com/punitmishra/vaultic/pull/43))
+
+A fourth binary: an [MCP](https://modelcontextprotocol.io/) server that
+lets AI clients (Claude Code, etc.) read vault credentials without the
+user pasting secrets into chat.
+
+- Bridges MCP (JSON-RPC over stdio) to `vaultic-agent`'s Unix socket, so
+  the vault must be unlocked via `vaultic unlock` first — no password
+  ever crosses MCP.
+- Six tools. Read-only (`vault_status`, `list_entries`,
+  `search_entries`) need no consent; secret-returning tools
+  (`get_password`, `get_credential`, `get_totp`) prompt for explicit
+  y/N consent on stderr and are rate-limited to 10 requests/minute.
+- All credentials stay local; nothing is sent to AI servers.
+- `--no-consent` (trusted-env only), `--socket <path>`, and `--verbose`
+  flags. New module `src/mcp/` (server, tools, error) and binary
+  `src/bin/vaultic_mcp.rs`. Documented in
+  [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
+
+### Changed
+
+- **`sequoia-openpgp` 1.21 → 2.3**
+  ([#42](https://github.com/punitmishra/vaultic/pull/42)) clears
+  RUSTSEC-2025-0136. The `gpg` feature is still off by default; this
+  removes the advisory for users who opt in.
+
 See [open issues](https://github.com/punitmishra/vaultic/issues) for what's
-in flight. Notable next-up: `bincode 1 → 2` in
+still in flight. Notable next-up: cut **v2.3.0** and publish to crates.io
+(see [`ROADMAP.md`](ROADMAP.md) § Release chores), then `bincode 1 → 2` in
 [#6](https://github.com/punitmishra/vaultic/issues/6) Phase B and the
 mlock follow-through in [#24](https://github.com/punitmishra/vaultic/issues/24).
 

@@ -6,28 +6,39 @@ This file is a high-level pointer to where the project is going. For
 
 ## Current state
 
-Vaultic 2.1.0 ships **three binaries**: the original CLI/TUI
+Vaultic 2.2.0 ships **four binaries**: the original CLI/TUI
 (`vaultic`), a long-running Unix-socket daemon (`vaultic-agent`),
-and an egui desktop app (`vaultic-gui`). All three share the
-underlying library, with the daemon serving the GUI over a typed
+an egui desktop app (`vaultic-gui`), and an MCP server for AI
+clients (`vaultic-mcp`). All four share the underlying library, with
+the daemon serving the GUI, CLI, and MCP server over a typed
 JSON-over-Unix-socket protocol (see
-[`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md)).
+[`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) and
+[`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
 
-A ~10k-entry vault performs at ~16 ms list / ~20 ms search. `cargo
-audit` reports 1 vulnerability (`sequoia-openpgp`, only built with
-`--features gpg`) and 4 unmaintained warnings (mostly transitive).
+A ~10k-entry vault performs at ~16 ms list / ~20 ms search
+(reproduce with `cargo bench --bench vault_ops`). The
+`sequoia-openpgp` advisory (RUSTSEC-2025-0136) was cleared by the
+2.3 bump in [#42](https://github.com/punitmishra/vaultic/pull/42);
+remaining `cargo audit` output is unmaintained-transitive warnings.
 
 ## Active tracks
 
-### Headline for v2.2 — make the daemon invisible
+### Headline for v2.3 — launch + crates.io
 
-The biggest UX gap right now is that the agent and the CLI feel
-like two separate tools. Closing it is two paired issues:
+`vaultic-mcp` (merged, [#43](https://github.com/punitmishra/vaultic/pull/43))
+and the sequoia bump close the last two blockers for a public launch.
+The next release is about getting Vaultic installable and discoverable:
+publish to crates.io so `cargo install vaultic` works, cut real
+release binaries, and run the launch. See **Release chores** below.
+
+### Make the daemon invisible — remaining half
+
+The CLI↔daemon bridge shipped in 2.2.0 ([#21](https://github.com/punitmishra/vaultic/issues/21)).
+What remains is auto-starting the agent so users never think about it:
 
 | Track | Issue | Summary |
 |---|---|---|
-| Bridge CLI session model and daemon in-memory state | [#21](https://github.com/punitmishra/vaultic/issues/21) | When the daemon is running, route CLI commands through it. Drop back to session files when not. Single best UX upgrade. |
-| launchd / systemd integration for `vaultic-agent` | [#22](https://github.com/punitmishra/vaultic/issues/22) | Pairs with #21. Once the CLI uses the daemon transparently, auto-starting it at login means the user never has to think about the daemon. |
+| launchd / systemd integration for `vaultic-agent` | [#22](https://github.com/punitmishra/vaultic/issues/22) | Now that the CLI uses the daemon transparently, auto-starting it at login means the user never has to think about the daemon. Also makes `vaultic-mcp` reliably available to AI clients. |
 
 ### Tech debt / security hardening
 
@@ -56,10 +67,28 @@ like two separate tools. Closing it is two paired issues:
 |---|---|---|
 | GitHub Actions billing lock | [#8](https://github.com/punitmishra/vaultic/issues/8) | CI/release pipelines blocked until resolved. Tags exist but artifacts can't auto-build. |
 
+## Release chores (v2.3 / launch)
+
+Getting-it-shipped work, tracked here until it has issues of its own.
+Roughly in the order it needs doing:
+
+| Chore | Status | Notes |
+|---|---|---|
+| Cut v2.3.0 | ☐ Todo | Bump `Cargo.toml` + `CITATION.cff` to 2.3.0, move `[Unreleased]` CHANGELOG entries (MCP #43, sequoia #42) under a dated `[2.3.0]`, tag `v2.3.0`. |
+| Publish to crates.io | ☐ Todo | `cargo publish` so the README's `cargo install vaultic` works (currently only `--git` installs). Verify `Cargo.toml` metadata (`description`, `keywords`, `categories`, `readme`, `license`) and that `cargo package` is clean. |
+| Release binaries for macOS / Linux / Windows | ☐ Todo | Blocked on the CI billing lock ([#8](https://github.com/punitmishra/vaultic/issues/8)). All four binaries per target; the Direct Download table in the README already lists the expected artifact names. Windows is CLI-only until the daemon gets a named-pipe transport. |
+| Refresh Homebrew formula | ☐ Todo | Point `Formula/` at the new tag + checksums once release artifacts exist. |
+| `cargo audit` gate green | ☐ Todo | Confirm the tree is advisory-free (sequoia already cleared) or that every remaining warning is an unmaintained-transitive with a documented rationale. |
+| Record an MCP demo cast | ☐ Todo | The three existing asciinema casts cover CLI / daemon / TUI; add one for `vaultic-mcp` driving a credential fetch from an AI client. |
+| Launch sequence | ☐ Todo | Show HN + r/rust + r/privacy + r/selfhosted + lobste.rs, angled per community. Lead with the crypto-honesty + threat-model story. |
+
 ## Recently closed
 
 | Track | Issue | Closed in |
 |---|---|---|
+| MCP server for AI tool integration | [#43](https://github.com/punitmishra/vaultic/pull/43) | v2.2.0 line — `vaultic-mcp` |
+| `sequoia-openpgp` 1.x advisory (RUSTSEC-2025-0136) | [#42](https://github.com/punitmishra/vaultic/pull/42) | v2.2.0 line — bumped to 2.3 |
+| Bridge CLI session model and daemon in-memory state | [#21](https://github.com/punitmishra/vaultic/issues/21) | v2.2.0 — PRs #29/#30/#31 |
 | Release pipeline + Homebrew formula bug | [#7](https://github.com/punitmishra/vaultic/issues/7) | v2.0.1 |
 | Beyond CLI: GUI / daemon / browser ext | [#9](https://github.com/punitmishra/vaultic/issues/9) | v2.1.0 — five-PR arc (#14–#18) |
 

@@ -6,7 +6,6 @@ abstract: "A local-first, encrypted password manager written in Rust. No cloud, 
 authors:
   - family-names: "Mishra"
     given-names: "Punit"
-    orcid: ""
 repository-code: "https://github.com/punitmishra/vaultic"
 url: "https://github.com/punitmishra/vaultic"
 license: MIT
@@ -20,3 +19,5 @@ keywords:
   - local-first
   - cli
   - fido2
+  - mcp
+  - model-context-protocol

@@ -5,9 +5,9 @@
 > override it. It's also the part of the project most people don't put in
 > a README.
 
-I'm a single maintainer. Vaultic is ~25k lines of Rust, three binaries, a
-custom Unix-socket protocol, a TUI, a GUI, a vault format, encrypted
-sharing, and 435 tests. I wrote a meaningful fraction of those lines
+I'm a single maintainer. Vaultic is ~25k lines of Rust, four binaries, a
+custom Unix-socket protocol, a TUI, a GUI, an MCP server, a vault format,
+encrypted sharing, and 439 tests. I wrote a meaningful fraction of those lines
 myself. Most of the rest came out of long sessions with Claude Code,
 where I described the shape I wanted and the assistant produced the code,
 the tests, the doc, or all three.
