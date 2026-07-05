@@ -168,8 +168,6 @@ impl VaulticMcpServer {
 
     /// Execute get_password tool.
     async fn get_password(&self, params: GetPasswordParams) -> Result<String, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
         let (id, entry_name) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
@@ -178,6 +176,10 @@ impl VaulticMcpServer {
         self.context
             .request_consent("get_password", &entry_name)
             .await?;
+
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
@@ -199,8 +201,6 @@ impl VaulticMcpServer {
         &self,
         params: GetCredentialParams,
     ) -> Result<CredentialResult, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
         let (id, entry_name) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
@@ -209,6 +209,10 @@ impl VaulticMcpServer {
         self.context
             .request_consent("get_credential", &entry_name)
             .await?;
+
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
@@ -233,8 +237,6 @@ impl VaulticMcpServer {
 
     /// Execute get_totp tool.
     async fn get_totp(&self, params: GetTotpParams) -> Result<TotpResult, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
         let (id, entry_name) = self
             .resolve_for_consent(&mut client, params.entry_id, params.name)
@@ -243,6 +245,10 @@ impl VaulticMcpServer {
         self.context
             .request_consent("get_totp", &entry_name)
             .await?;
+
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let totp = client.get_totp(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
