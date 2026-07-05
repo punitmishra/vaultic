@@ -49,6 +49,23 @@ What remains is auto-starting the agent so users never think about it:
 | Mlock the unlocked master key | [#24](https://github.com/punitmishra/vaultic/issues/24) | Prevent the daemon's master-key region from swapping to disk under memory pressure. |
 | Threat model document | [#26](https://github.com/punitmishra/vaultic/issues/26) | Formalize what we defend against, what we don't, and why. |
 
+### MCP hardening & next steps
+
+A correctness pass on `vaultic-mcp` (landing in v2.3.0) fixed five real
+bugs: consent read from the protocol-owned stdin (now reads `/dev/tty` and
+fails closed without one), locked-vault errors were mislabeled (now surface
+`VaultLocked` with the "run `vaultic unlock`" hint), the rate limiter
+charged for denials/not-founds (now counts only consented disclosures),
+malformed tool args silently defaulted (now rejected), and a redundant
+`list_summary` round-trip per secret fetch (now removed). What's next:
+
+| Track | Summary |
+|---|---|
+| Consent for non-TTY hosts | The `/dev/tty` fix works when `vaultic-mcp` is launched from a terminal; GUI MCP hosts (Claude Desktop) have no TTY, so secret tools fail closed. Add a protocol-native approval path (MCP **elicitation** back to the client), and/or agent-side approval (the GUI/desktop app prompts), and/or a pre-authorized per-entry allowlist. This is the headline MCP feature for after v2.3.0. |
+| Audit log of MCP accesses | Optionally record which entries were disclosed to which client and when, so a user can review AI credential access. Ties into the daemon's (currently absent) access log — design where the log lives and who can read it. |
+| Per-tool / per-entry allowlists + config file | A `vaultic-mcp` config (tags/folders an AI may read, tools it may call, auto-approve lists) so consent can be scoped rather than all-or-`--no-consent`. |
+| Write tools behind stronger gating | `add`/`edit`/`generate` exposed to AI clients would be powerful but higher-risk; only behind explicit config + per-call consent, never in `--no-consent`. |
+
 ### Feature completions
 
 | Track | Issue | Summary |

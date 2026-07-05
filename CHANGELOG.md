@@ -26,6 +26,27 @@ user pasting secrets into chat.
   `src/bin/vaultic_mcp.rs`. Documented in
   [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
 
+### Fixed — MCP correctness pass
+
+A review of the new `vaultic-mcp` server found and fixed five bugs before
+its first tagged release:
+
+- **Consent no longer collides with the protocol.** The consent prompt read
+  from stdin, which the MCP stdio transport owns — a consent-gated tool would
+  steal a JSON-RPC frame or hang. Consent now reads the controlling terminal
+  (`/dev/tty`) via `spawn_blocking`, and **fails closed** (new
+  `ConsentUnavailable` error) when there is no terminal.
+- **Locked-vault errors are actionable again.** `VaultLocked` was never
+  constructed, so a locked vault (the most common state) returned a raw
+  `Agent error: ...`. It now surfaces `McpError::VaultLocked` with the
+  "run `vaultic unlock`" hint.
+- **Rate limiting counts only consented disclosures**, not not-found lookups,
+  malformed requests, or denials.
+- **Malformed tool arguments are rejected** with a clear message instead of
+  silently collapsing to defaults (which could ignore a valid `entry_id` or
+  turn `list_entries` into list-everything).
+- **Removed a redundant `list_summary` round-trip** on every secret fetch.
+
 ### Changed
 
 - **`sequoia-openpgp` 1.21 → 2.3**

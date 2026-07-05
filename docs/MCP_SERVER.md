@@ -20,11 +20,11 @@ The `vaultic-mcp` binary implements the [Model Context Protocol (MCP)](https://m
 
 1. **Pre-unlocked vault**: The vault must be unlocked via `vaultic unlock` before using the MCP server. No passwords are transmitted over the MCP protocol.
 
-2. **User consent**: Secret-access tools (`get_password`, `get_credential`, `get_totp`) prompt the user for consent on stderr before revealing credentials. The AI cannot access secrets without explicit approval.
+2. **User consent**: Secret-access tools (`get_password`, `get_credential`, `get_totp`) prompt the user on the **controlling terminal** (`/dev/tty`) before revealing credentials — never on stdin/stdout, which carry the MCP protocol. If `vaultic-mcp` has no controlling terminal (for example, it was launched by a GUI MCP host), it **fails closed**: the secret tool returns a "consent unavailable" error rather than leaking the credential. Run it from a terminal, or use `--no-consent` in a trusted, non-interactive environment. The AI can never access a secret without explicit approval.
 
 3. **Local-only**: All credentials stay on your machine. The MCP server communicates with the local `vaultic-agent` daemon — nothing is sent to AI servers.
 
-4. **Rate limiting**: Credential access is rate-limited to 10 requests per minute to prevent enumeration attacks.
+4. **Rate limiting**: Credential disclosures are rate-limited to 10 per minute to blunt enumeration. Only **consented disclosures** count — not-found lookups, malformed requests, and denials don't consume the budget.
 
 ## Setup
 
@@ -102,7 +102,8 @@ These tools reveal secrets and will prompt for approval:
 | `get_credential` | Get full credential (username + password + URL) |
 | `get_totp` | Get the current TOTP code and time remaining |
 
-When Claude calls one of these tools, you'll see a consent prompt on stderr:
+When Claude calls one of these tools, you'll see a consent prompt on the
+terminal where `vaultic-mcp` is running (its controlling terminal, `/dev/tty`):
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -115,6 +116,13 @@ Allow access? [y/N]:
 ```
 
 Type `y` to approve or `n` (or just press Enter) to deny.
+
+> **No terminal?** Consent needs a controlling terminal because stdin/stdout
+> are reserved for the MCP protocol. If you launch `vaultic-mcp` from a GUI
+> MCP host (no TTY), secret tools fail closed with a "consent unavailable"
+> error. Either launch it from a terminal, or run it with `--no-consent` in a
+> trusted environment. A protocol-native approval flow (MCP elicitation) is on
+> the roadmap — see [`ROADMAP.md`](../ROADMAP.md).
 
 ## Usage Examples
 
