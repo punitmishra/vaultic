@@ -22,11 +22,10 @@ on-disk vault format.
 │                                                                  │
 │   vaultic        vaultic-gui      vaultic-mcp     vaultic-agent  │
 │   (CLI + TUI)    (eframe/egui)    (MCP server)    (UDS daemon)   │
-│        │              │                │                │        │
-│        │              └── peer-cred ───┼── JSON/UDS ────►│        │
-│        │                  (GUI, MCP, and CLI are all     │        │
-│        │                   agent clients)                │        │
-│        ▼                                                 ▼        │
+│        ┆              │                │                │        │
+│        ┆ opportunistic└── peer-cred ───┼── JSON/UDS ────►│        │
+│        ┆   (GUI + MCP are pure agent clients; the CLI    │        │
+│        ▼    routes through the agent when available)     ▼        │
 │   ┌──────────────────────────────────────────────────────┐       │
 │   │                    vaultic library                    │       │
 │   │                                                       │       │
@@ -49,9 +48,15 @@ on-disk vault format.
 
 ### `vaultic` (CLI + TUI)
 
-The original surface. Self-contained: opens the vault directly using
-session files (`session/` under the vault directory). Doesn't need
-the agent.
+The original surface, and a **hybrid** client. It is primarily
+self-contained: with no daemon running it opens the vault directly
+using session files (`session/` under the vault directory). When
+`vaultic-agent` IS running and unlocked for the same vault, the CLI
+opportunistically routes reads (`get`/`list`/`search`/`totp show`)
+through it and notifies it on unlock/lock — best-effort, and it falls
+back to the local-sled path on a clean miss (shipped in 2.2.0; see
+`src/cli/agent_bridge.rs`). The agent is an accelerator, not a
+requirement.
 
 - Entry point: `src/main.rs` → `src/cli/mod.rs`
 - Subcommands defined as `clap` enum variants in `cli::Commands`

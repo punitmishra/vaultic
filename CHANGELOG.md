@@ -43,10 +43,11 @@ mlock follow-through in [#24](https://github.com/punitmishra/vaultic/issues/24).
 
 The CLI and the daemon now share unlock state. When `vaultic-agent` is
 running, `vaultic` routes through it; when it isn't, the CLI behaves
-exactly as before. This release also adds the OSS-foundation docs
-(`SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `VIBE_CODING.md`)
-that close [#21](https://github.com/punitmishra/vaultic/issues/21) and
-the broader repo-hygiene work.
+exactly as before. This closes
+[#21](https://github.com/punitmishra/vaultic/issues/21) (the
+CLI ↔ daemon bridge, detailed below). The release also adds the
+OSS-foundation docs (`SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`,
+`VIBE_CODING.md`) that round out the broader repo-hygiene work.
 
 ### Added — CLI ↔ daemon bridge ([#21](https://github.com/punitmishra/vaultic/issues/21))
 
@@ -221,7 +222,7 @@ named palettes are tuned to coherent looks across CLI and GUI.
 - The CLI's `vaultic unlock` (session-file model) and the daemon
   (in-memory key model) are **not bridged**. Unlocking via CLI
   doesn't make the GUI see "unlocked". Bridging is a separate
-  workstream.
+  workstream. _(Resolved in 2.2.0 — [#21](https://github.com/punitmishra/vaultic/issues/21).)_
 - Daemon is **Unix only**: Linux + macOS. Windows is deferred
   (named-pipe transport, peer-cred equivalent).
 - No daemonization or `launchd` / `systemd` integration; users

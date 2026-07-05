@@ -41,8 +41,9 @@ vaultic unlock
 
 ## Four binaries
 
-Vaultic 2.2 ships four programs that share one library and one
-on-disk vault format:
+Vaultic ships four programs that share one library and one on-disk
+vault format. The newest, `vaultic-mcp`, landed after the 2.2.0
+release and ships in v2.3.0 (it's already in the source tree):
 
 | Binary | What it does |
 |---|---|

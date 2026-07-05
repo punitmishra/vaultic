@@ -6,12 +6,13 @@ This file is a high-level pointer to where the project is going. For
 
 ## Current state
 
-Vaultic 2.2.0 ships **four binaries**: the original CLI/TUI
+The current tree ships **four binaries**: the original CLI/TUI
 (`vaultic`), a long-running Unix-socket daemon (`vaultic-agent`),
 an egui desktop app (`vaultic-gui`), and an MCP server for AI
-clients (`vaultic-mcp`). All four share the underlying library, with
-the daemon serving the GUI, CLI, and MCP server over a typed
-JSON-over-Unix-socket protocol (see
+clients (`vaultic-mcp`). The released v2.2.0 shipped the first three;
+`vaultic-mcp` is merged but unreleased, landing in v2.3.0. All four
+share the underlying library, with the daemon serving the GUI, CLI,
+and MCP server over a typed JSON-over-Unix-socket protocol (see
 [`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md) and
 [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
 
@@ -75,6 +76,7 @@ Roughly in the order it needs doing:
 | Chore | Status | Notes |
 |---|---|---|
 | Cut v2.3.0 | ☐ Todo | Bump `Cargo.toml` + `CITATION.cff` to 2.3.0, move `[Unreleased]` CHANGELOG entries (MCP #43, sequoia #42) under a dated `[2.3.0]`, tag `v2.3.0`. |
+| Threat-model story ready | ☐ Todo | The launch sequence leads with crypto-honesty + threat model. `SECURITY.md` already carries an in-scope/out-of-scope model linked from the README; formalize/expand it per [#26](https://github.com/punitmishra/vaultic/issues/26) so the front-page story holds up to r/crypto / HN scrutiny before posting. |
 | Publish to crates.io | ☐ Todo | `cargo publish` so the README's `cargo install vaultic` works (currently only `--git` installs). Verify `Cargo.toml` metadata (`description`, `keywords`, `categories`, `readme`, `license`) and that `cargo package` is clean. |
 | Release binaries for macOS / Linux / Windows | ☐ Todo | Blocked on the CI billing lock ([#8](https://github.com/punitmishra/vaultic/issues/8)). All four binaries per target; the Direct Download table in the README already lists the expected artifact names. Windows is CLI-only until the daemon gets a named-pipe transport. |
 | Refresh Homebrew formula | ☐ Todo | Point `Formula/` at the new tag + checksums once release artifacts exist. |
@@ -86,8 +88,8 @@ Roughly in the order it needs doing:
 
 | Track | Issue | Closed in |
 |---|---|---|
-| MCP server for AI tool integration | [#43](https://github.com/punitmishra/vaultic/pull/43) | v2.2.0 line — `vaultic-mcp` |
-| `sequoia-openpgp` 1.x advisory (RUSTSEC-2025-0136) | [#42](https://github.com/punitmishra/vaultic/pull/42) | v2.2.0 line — bumped to 2.3 |
+| MCP server for AI tool integration | [#43](https://github.com/punitmishra/vaultic/pull/43) | Unreleased (→ v2.3.0) — `vaultic-mcp` |
+| `sequoia-openpgp` 1.x advisory (RUSTSEC-2025-0136) | [#42](https://github.com/punitmishra/vaultic/pull/42) | Unreleased (→ v2.3.0) — bumped to 2.3 |
 | Bridge CLI session model and daemon in-memory state | [#21](https://github.com/punitmishra/vaultic/issues/21) | v2.2.0 — PRs #29/#30/#31 |
 | Release pipeline + Homebrew formula bug | [#7](https://github.com/punitmishra/vaultic/issues/7) | v2.0.1 |
 | Beyond CLI: GUI / daemon / browser ext | [#9](https://github.com/punitmishra/vaultic/issues/9) | v2.1.0 — five-PR arc (#14–#18) |
