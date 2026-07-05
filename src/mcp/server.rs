@@ -418,9 +418,12 @@ impl ServerHandler for VaulticMcpServer {
                 "search_entries" => {
                     let params: SearchEntriesParams = match serde_json::from_value(args) {
                         Ok(p) => p,
-                        Err(e) => return Ok(CallToolResult::error(vec![Content::text(
-                            format!("Invalid parameters: {}", e)
-                        )])),
+                        Err(e) => {
+                            return Ok(CallToolResult::error(vec![Content::text(format!(
+                                "Invalid parameters: {}",
+                                e
+                            ))]))
+                        }
                     };
                     self.search_entries(params)
                         .await
@@ -469,8 +472,8 @@ impl ServerHandler for VaulticMcpServer {
 
             match result {
                 Ok(value) => {
-                    let text = serde_json::to_string_pretty(&value)
-                        .unwrap_or_else(|_| value.to_string());
+                    let text =
+                        serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
                     Ok(CallToolResult::success(vec![Content::text(text)]))
                 }
                 Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),

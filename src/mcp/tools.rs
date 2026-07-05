@@ -167,7 +167,8 @@ impl RateLimiter {
         let now = Instant::now();
 
         // Remove old requests outside the window
-        self.requests.retain(|t| now.duration_since(*t) < self.window);
+        self.requests
+            .retain(|t| now.duration_since(*t) < self.window);
 
         if self.requests.len() >= self.max_requests as usize {
             return false;
@@ -210,7 +211,11 @@ impl ToolContext {
 
     /// Request consent for secret access.
     pub fn request_consent(&self, action: &str, entry_name: &str) -> Result<(), McpError> {
-        if !self.consent.prompt(action, entry_name).map_err(McpError::Io)? {
+        if !self
+            .consent
+            .prompt(action, entry_name)
+            .map_err(McpError::Io)?
+        {
             return Err(McpError::ConsentDenied);
         }
         Ok(())
