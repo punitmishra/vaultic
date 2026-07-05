@@ -117,22 +117,24 @@ impl VaulticMcpServer {
         Ok(entries.into_iter().map(EntryInfo::from).collect())
     }
 
-    /// Find entry by ID or name.
+    /// Resolve an entry by ID or name. Returns the id plus the entry's name
+    /// when it is known for free (the name-based path already fetched the
+    /// matching summary); the id-based path returns `None` since a raw UUID
+    /// carries no name.
     async fn resolve_entry(
         &self,
         client: &mut AgentClient,
         entry_id: Option<String>,
         name: Option<String>,
-    ) -> Result<Uuid, McpError> {
+    ) -> Result<(Uuid, Option<String>), McpError> {
         if let Some(id_str) = entry_id {
-            Uuid::parse_str(&id_str)
-                .map_err(|_| McpError::InvalidParams(format!("Invalid UUID: {}", id_str)))
+            let id = Uuid::parse_str(&id_str)
+                .map_err(|_| McpError::InvalidParams(format!("Invalid UUID: {}", id_str)))?;
+            Ok((id, None))
         } else if let Some(name) = name {
             let entries = client.search(name.clone()).await?;
-            entries
-                .first()
-                .map(|e| e.id)
-                .ok_or(McpError::NotFound(name))
+            let matched = entries.into_iter().next().ok_or(McpError::NotFound(name))?;
+            Ok((matched.id, Some(matched.name)))
         } else {
             Err(McpError::InvalidParams(
                 "Either entry_id or name must be provided".to_string(),
@@ -140,22 +142,38 @@ impl VaulticMcpServer {
         }
     }
 
+    /// Resolve an entry and a human-readable name for the consent prompt, in
+    /// as few round-trips as possible. The name-based path already has the
+    /// name; only the id-based path pays for a single `list_summary` lookup
+    /// (falling back to the raw id if that fails).
+    async fn resolve_for_consent(
+        &self,
+        client: &mut AgentClient,
+        entry_id: Option<String>,
+        name: Option<String>,
+    ) -> Result<(Uuid, String), McpError> {
+        let (id, resolved_name) = self.resolve_entry(client, entry_id, name.clone()).await?;
+        let display = match resolved_name {
+            Some(n) => n,
+            None => client
+                .list_summary()
+                .await
+                .ok()
+                .and_then(|es| es.into_iter().find(|e| e.id == id).map(|e| e.name))
+                .or(name)
+                .unwrap_or_else(|| id.to_string()),
+        };
+        Ok((id, display))
+    }
+
     /// Execute get_password tool.
     async fn get_password(&self, params: GetPasswordParams) -> Result<String, McpError> {
         self.context.check_rate_limit().await?;
 
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
-
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
         self.context
             .request_consent("get_password", &entry_name)
@@ -184,17 +202,9 @@ impl VaulticMcpServer {
         self.context.check_rate_limit().await?;
 
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
-
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
         self.context
             .request_consent("get_credential", &entry_name)
@@ -226,17 +236,9 @@ impl VaulticMcpServer {
         self.context.check_rate_limit().await?;
 
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
-
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
 
         self.context
             .request_consent("get_totp", &entry_name)
