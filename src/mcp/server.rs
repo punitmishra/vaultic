@@ -25,6 +25,17 @@ use crate::mcp::tools::{
 };
 use crate::models::SearchFilter;
 
+/// Parse tool arguments into the tool's typed params, returning an MCP error
+/// result on malformed input instead of silently falling back to defaults.
+/// A wrong-typed field is a caller mistake and should surface, not be masked.
+fn parse_tool_args<T: serde::de::DeserializeOwned>(
+    args: serde_json::Value,
+) -> Result<T, CallToolResult> {
+    serde_json::from_value(args).map_err(|e| {
+        CallToolResult::error(vec![Content::text(format!("Invalid parameters: {}", e))])
+    })
+}
+
 /// The Vaultic MCP server.
 ///
 /// Connects to the vaultic-agent daemon and exposes vault operations as MCP tools.
@@ -419,12 +430,10 @@ impl ServerHandler for VaulticMcpServer {
                     .map_err(|e| e.to_ai_message()),
 
                 "list_entries" => {
-                    let params: ListEntriesParams =
-                        serde_json::from_value(args).unwrap_or(ListEntriesParams {
-                            query: None,
-                            folder: None,
-                            tags: None,
-                        });
+                    let params: ListEntriesParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.list_entries(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -432,14 +441,9 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "search_entries" => {
-                    let params: SearchEntriesParams = match serde_json::from_value(args) {
+                    let params: SearchEntriesParams = match parse_tool_args(args) {
                         Ok(p) => p,
-                        Err(e) => {
-                            return Ok(CallToolResult::error(vec![Content::text(format!(
-                                "Invalid parameters: {}",
-                                e
-                            ))]))
-                        }
+                        Err(r) => return Ok(r),
                     };
                     self.search_entries(params)
                         .await
@@ -448,11 +452,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_password" => {
-                    let params: GetPasswordParams =
-                        serde_json::from_value(args).unwrap_or(GetPasswordParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetPasswordParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_password(params)
                         .await
                         .map(|r| json!({"password": r}))
@@ -460,11 +463,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_credential" => {
-                    let params: GetCredentialParams =
-                        serde_json::from_value(args).unwrap_or(GetCredentialParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetCredentialParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_credential(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -472,11 +474,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_totp" => {
-                    let params: GetTotpParams =
-                        serde_json::from_value(args).unwrap_or(GetTotpParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetTotpParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_totp(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -519,5 +520,22 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "get_password"));
         assert!(tools.iter().any(|t| t.name == "get_credential"));
         assert!(tools.iter().any(|t| t.name == "get_totp"));
+    }
+
+    #[test]
+    fn parse_tool_args_rejects_wrong_typed_field() {
+        // `name` must be a string; a numeric value is a caller error and must
+        // surface, not silently collapse to defaults (which would then look
+        // like "no entry_id or name provided" despite a valid entry_id).
+        let bad = json!({"entry_id": "11111111-1111-1111-1111-111111111111", "name": 123});
+        let parsed: Result<GetPasswordParams, _> = parse_tool_args(bad);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn parse_tool_args_accepts_empty_object() {
+        // All fields are optional, so an empty object is valid.
+        let parsed: Result<GetPasswordParams, _> = parse_tool_args(json!({}));
+        assert!(parsed.is_ok());
     }
 }
