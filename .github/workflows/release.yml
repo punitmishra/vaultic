@@ -63,27 +63,27 @@ jobs:
         if: "!matrix.use_cross && matrix.include_gui"
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Build with cargo (CLI + agent only)
+      - name: Build with cargo (CLI + agent + MCP only)
         if: "!matrix.use_cross && !matrix.include_gui"
         run: |
           cargo build --release --target ${{ matrix.target }} \
-            --bin vaultic --bin vaultic-agent
+            --bin vaultic --bin vaultic-agent --bin vaultic-mcp
 
-      - name: Build with cross (CLI + agent only)
+      - name: Build with cross (CLI + agent + MCP only)
         if: matrix.use_cross
         run: |
           cross build --release --target ${{ matrix.target }} \
-            --bin vaultic --bin vaultic-agent
+            --bin vaultic --bin vaultic-agent --bin vaultic-mcp
 
       - name: Package
         run: |
           cd target/${{ matrix.target }}/release
           if [ "${{ matrix.include_gui }}" = "true" ]; then
             tar czvf ../../../${{ matrix.name }}.tar.gz \
-              vaultic vaultic-agent vaultic-gui
+              vaultic vaultic-agent vaultic-gui vaultic-mcp
           else
             tar czvf ../../../${{ matrix.name }}.tar.gz \
-              vaultic vaultic-agent
+              vaultic vaultic-agent vaultic-mcp
           fi
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
@@ -125,7 +125,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czvf ../../../${{ matrix.name }}.tar.gz \
-            vaultic vaultic-agent vaultic-gui
+            vaultic vaultic-agent vaultic-gui vaultic-mcp
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
 

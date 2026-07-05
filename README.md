@@ -1,8 +1,8 @@
 # Vaultic
 
-A local-first password manager written in Rust. CLI, TUI, optional
-`ssh-agent`-style daemon, and a desktop GUI — all sharing one
-on-disk vault. No cloud, no servers, no telemetry.
+A **local-first, encrypted password manager** in Rust. No cloud, no account, no telemetry.
+Your vault is a directory of encrypted files on your machine — CLI, TUI, daemon, GUI, and
+MCP server all sharing one on-disk format.
 
 ```
  ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗██╗ ██████╗
@@ -14,6 +14,30 @@ on-disk vault. No cloud, no servers, no telemetry.
 
    Local-first  ·  Hardware-backed  ·  Yours, on disk
 ```
+
+## Quick Install
+
+```bash
+# Homebrew (macOS/Linux)
+brew tap punitmishra/vaultic && brew install vaultic
+
+# From source
+cargo install --git https://github.com/punitmishra/vaultic
+
+# Then:
+vaultic init -n "My Vault"
+vaultic unlock
+```
+
+## Security
+
+**Argon2id** key derivation (64 MB default), **XChaCha20-Poly1305** authenticated encryption,
+**X25519** key exchange for sharing. All crypto from vetted Rust crates (`argon2`, `chacha20poly1305`,
+`x25519-dalek`) — **no home-rolled cryptography**.
+
+- **Threat model**: [`SECURITY.md`](SECURITY.md) — what we defend against and what's out of scope
+- **Report vulnerabilities**: [GitHub Security Advisories](https://github.com/punitmishra/vaultic/security/advisories/new)
+- **License**: MIT
 
 ## Four binaries
 
