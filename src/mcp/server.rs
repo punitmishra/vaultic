@@ -165,7 +165,8 @@ impl VaulticMcpServer {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(entry_name.clone())
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 
@@ -203,7 +204,8 @@ impl VaulticMcpServer {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(entry_name.clone())
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 
@@ -244,7 +246,8 @@ impl VaulticMcpServer {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(format!("{} has no TOTP configured", entry_name))
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 

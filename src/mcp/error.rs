@@ -2,6 +2,7 @@
 
 use thiserror::Error;
 
+use crate::agent::protocol::ErrorCode;
 use crate::agent::ClientError;
 
 /// Errors that can occur in MCP operations.
@@ -25,7 +26,7 @@ pub enum McpError {
 
     /// Agent communication error
     #[error("Agent error: {0}")]
-    Agent(#[from] ClientError),
+    Agent(ClientError),
 
     /// Agent not running
     #[error("Vaultic agent is not running. Start it with `vaultic-agent start`.")]
@@ -42,6 +43,22 @@ pub enum McpError {
     /// Rate limit exceeded
     #[error("Rate limit exceeded. Please wait before requesting more credentials.")]
     RateLimitExceeded,
+}
+
+/// Map an agent client error into the most specific `McpError`.
+///
+/// A locked vault is the single most common failure (the vault must be
+/// pre-unlocked), so surface it as `VaultLocked` with an actionable message
+/// instead of a raw `Agent(...)`. `NotFound` without an entry name is left as
+/// `Agent` — the tool call sites that know the name build a richer
+/// `NotFound(name)` themselves.
+impl From<ClientError> for McpError {
+    fn from(e: ClientError) -> Self {
+        match e.agent_code() {
+            Some(ErrorCode::VaultLocked) => McpError::VaultLocked,
+            _ => McpError::Agent(e),
+        }
+    }
 }
 
 impl McpError {
@@ -72,5 +89,33 @@ impl McpError {
             }
             _ => self.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::protocol::AgentError;
+
+    #[test]
+    fn client_vault_locked_maps_to_vault_locked() {
+        let ce = ClientError::Agent(AgentError {
+            code: ErrorCode::VaultLocked,
+            message: "vault is locked".to_string(),
+        });
+        let me: McpError = ce.into();
+        assert!(matches!(me, McpError::VaultLocked));
+        // The friendly, actionable message is now reachable.
+        assert!(me.to_ai_message().contains("vaultic unlock"));
+    }
+
+    #[test]
+    fn other_agent_errors_stay_agent() {
+        let ce = ClientError::Agent(AgentError {
+            code: ErrorCode::VaultIo,
+            message: "disk error".to_string(),
+        });
+        let me: McpError = ce.into();
+        assert!(matches!(me, McpError::Agent(_)));
     }
 }
