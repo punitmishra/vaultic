@@ -18,16 +18,18 @@ MCP server all sharing one on-disk format.
 ## Quick Install
 
 ```bash
-# Homebrew (macOS/Linux)
-brew tap punitmishra/vaultic && brew install vaultic
-
-# From source
+# From source (works today)
 cargo install --git https://github.com/punitmishra/vaultic
 
 # Then:
 vaultic init -n "My Vault"
 vaultic unlock
 ```
+
+> Homebrew (`brew install vaultic`), `cargo install vaultic` from
+> crates.io, and pre-built release binaries all land with the **v2.3.0**
+> release. Until then, build from source (above) or from a checkout.
+> See [`ROADMAP.md`](ROADMAP.md) § Release chores.
 
 ## Security
 
@@ -185,14 +187,23 @@ When `vaultic-agent` is running and unlocked for the active vault:
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+Until the v2.3.0 release pipeline runs, **From Source** (below) is the
+supported path.
+
+### Homebrew (macOS/Linux) — with v2.3.0
+
+> ⏳ **Pending the v2.3.0 release.** The formula in `Formula/` still
+> carries placeholder checksums and points at release artifacts that
+> don't exist yet (the pipeline is blocked on the CI billing lock,
+> [#8](https://github.com/punitmishra/vaultic/issues/8)). Build from
+> source below until then.
 
 ```bash
 brew tap punitmishra/vaultic
 brew install vaultic
 ```
 
-### From Source
+### From Source (works today)
 
 ```bash
 # Clone repository
@@ -209,9 +220,16 @@ cp target/release/vaultic /usr/local/bin/
 vaultic --version
 ```
 
-### Direct Download
+### Direct Download — with v2.3.0
 
-Download pre-built binaries from the [releases page](https://github.com/punitmishra/vaultic/releases):
+> ⏳ **Pending the v2.3.0 release** (blocked on the CI billing lock,
+> [#8](https://github.com/punitmishra/vaultic/issues/8)). The latest
+> tagged release is v2.1.0; the artifact names below are what the
+> release workflow will publish. Each tarball ships `vaultic`,
+> `vaultic-agent`, and `vaultic-mcp`; the x86_64 macOS/Linux builds
+> also include `vaultic-gui`.
+
+Once published, download pre-built binaries from the [releases page](https://github.com/punitmishra/vaultic/releases):
 - macOS (Intel): `vaultic-macos-x86_64.tar.gz`
 - macOS (Apple Silicon): `vaultic-macos-aarch64.tar.gz`
 - Linux (x86_64): `vaultic-linux-x86_64.tar.gz`

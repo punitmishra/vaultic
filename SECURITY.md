@@ -67,6 +67,8 @@ What we defend against:
   prompts for explicit consent on stderr and is rate-limited (10/min), so a
   connected AI can't silently enumerate credentials. Secrets are returned to
   the local MCP client only; the server sends nothing to remote AI services.
+  See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the full tool list and
+  consent model.
 - **Malformed wire frames.** Frames are length-prefixed and capped at 1 MiB.
   Oversized or invalid frames close the connection without resource use.
 - **Memory hygiene at rest.** Sensitive in-memory values
@@ -96,7 +98,7 @@ the threat model:
 
 ## Known unfixed issues
 
-- **Windows** is not supported in v1 (no named-pipe transport, no peer-cred
+- **Windows** is not supported (no named-pipe transport, no peer-cred
   equivalent yet). Don't run the daemon on Windows expecting the same
   guarantees.
 - **Master key is not `mlock`'d.** Under memory pressure the daemon's key

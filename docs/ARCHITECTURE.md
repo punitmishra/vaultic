@@ -1,7 +1,9 @@
 # Vaultic Architecture
 
-This is a contributor-oriented overview of how Vaultic is laid out as
-of v2.2.0. It complements:
+This is a contributor-oriented overview of how Vaultic is laid out on
+the current tree (the released v2.2.0 shipped three binaries;
+`vaultic-mcp` landed after it, in [#43](https://github.com/punitmishra/vaultic/pull/43),
+and ships in v2.3.0). It complements:
 
 - [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md) — wire format and threat
   model for the daemon ↔ client conversation
@@ -200,7 +202,8 @@ in the worker pumps them into tokio mpsc.
 | `benches/vault_ops.rs` | Criterion benchmarks for list / search / get / add / unlock against a 10k-entry vault |
 
 `cargo test --release` runs everything except benches. Total: 439
-tests as of v2.2.0.
+tests on the current tree (the released 2.2.0 shipped 435;
+`vaultic-mcp` adds the rest).
 
 ## Known seams (for future contributors)
 
