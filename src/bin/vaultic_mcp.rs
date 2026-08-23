@@ -38,7 +38,7 @@ use rmcp::serve_server;
 use rmcp::transport::io::stdio;
 use tracing_subscriber::EnvFilter;
 
-use vaultic::mcp::VaulticMcpServer;
+use vaultic::mcp::{McpConfig, VaulticMcpServer};
 
 #[derive(Parser)]
 #[command(
@@ -56,6 +56,11 @@ struct Args {
     /// Defaults to the standard per-user socket path.
     #[arg(long)]
     socket: Option<String>,
+
+    /// Path to a consent-policy config (TOML). Defaults to
+    /// $XDG_CONFIG_HOME/vaultic/mcp.toml if present.
+    #[arg(long)]
+    config: Option<String>,
 
     /// Enable verbose logging to stderr.
     #[arg(short, long)]
@@ -77,11 +82,23 @@ async fn main() -> ExitCode {
             .init();
     }
 
+    // Load the optional consent-policy config (auto-approve allowlist).
+    let config = match McpConfig::resolve(args.config.as_deref().map(std::path::Path::new)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("vaultic-mcp: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    if config.has_auto_approve() {
+        eprintln!("vaultic-mcp: consent-policy config loaded (auto-approve rules active)");
+    }
+
     // Create the MCP server
     let server = if let Some(socket) = args.socket {
-        VaulticMcpServer::with_socket_path(!args.no_consent, socket)
+        VaulticMcpServer::with_socket_path(!args.no_consent, socket, config)
     } else {
-        VaulticMcpServer::new(!args.no_consent)
+        VaulticMcpServer::new(!args.no_consent, config)
     };
 
     // Start the MCP server over stdio

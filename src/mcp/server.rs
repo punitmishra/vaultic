@@ -16,14 +16,26 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::agent::paths::agent_socket_path;
-use crate::agent::protocol::ErrorCode;
+use crate::agent::protocol::{EntrySummary, ErrorCode};
 use crate::agent::{AgentClient, ClientError};
+use crate::mcp::config::McpConfig;
 use crate::mcp::error::McpError;
 use crate::mcp::tools::{
     CredentialResult, EntryInfo, GetCredentialParams, GetPasswordParams, GetTotpParams,
     ListEntriesParams, SearchEntriesParams, ToolContext, TotpResult, VaultStatusResult,
 };
 use crate::models::SearchFilter;
+
+/// Parse tool arguments into the tool's typed params, returning an MCP error
+/// result on malformed input instead of silently falling back to defaults.
+/// A wrong-typed field is a caller mistake and should surface, not be masked.
+fn parse_tool_args<T: serde::de::DeserializeOwned>(
+    args: serde_json::Value,
+) -> Result<T, CallToolResult> {
+    serde_json::from_value(args).map_err(|e| {
+        CallToolResult::error(vec![Content::text(format!("Invalid parameters: {}", e))])
+    })
+}
 
 /// The Vaultic MCP server.
 ///
@@ -38,17 +50,17 @@ pub struct VaulticMcpServer {
 
 impl VaulticMcpServer {
     /// Create a new MCP server.
-    pub fn new(require_consent: bool) -> Self {
+    pub fn new(require_consent: bool, config: McpConfig) -> Self {
         Self {
-            context: Arc::new(ToolContext::new(require_consent)),
+            context: Arc::new(ToolContext::new(require_consent, config)),
             socket_path: None,
         }
     }
 
     /// Create a new MCP server with a custom socket path.
-    pub fn with_socket_path(require_consent: bool, socket_path: String) -> Self {
+    pub fn with_socket_path(require_consent: bool, socket_path: String, config: McpConfig) -> Self {
         Self {
-            context: Arc::new(ToolContext::new(require_consent)),
+            context: Arc::new(ToolContext::new(require_consent, config)),
             socket_path: Some(socket_path),
         }
     }
@@ -117,22 +129,24 @@ impl VaulticMcpServer {
         Ok(entries.into_iter().map(EntryInfo::from).collect())
     }
 
-    /// Find entry by ID or name.
+    /// Resolve an entry by ID or name. Returns the id plus the matching
+    /// summary when it is known for free (the name-based path already fetched
+    /// it); the id-based path returns `None` since a raw UUID carries no
+    /// metadata.
     async fn resolve_entry(
         &self,
         client: &mut AgentClient,
         entry_id: Option<String>,
         name: Option<String>,
-    ) -> Result<Uuid, McpError> {
+    ) -> Result<(Uuid, Option<EntrySummary>), McpError> {
         if let Some(id_str) = entry_id {
-            Uuid::parse_str(&id_str)
-                .map_err(|_| McpError::InvalidParams(format!("Invalid UUID: {}", id_str)))
+            let id = Uuid::parse_str(&id_str)
+                .map_err(|_| McpError::InvalidParams(format!("Invalid UUID: {}", id_str)))?;
+            Ok((id, None))
         } else if let Some(name) = name {
             let entries = client.search(name.clone()).await?;
-            entries
-                .first()
-                .map(|e| e.id)
-                .ok_or(McpError::NotFound(name))
+            let matched = entries.into_iter().next().ok_or(McpError::NotFound(name))?;
+            Ok((matched.id, Some(matched)))
         } else {
             Err(McpError::InvalidParams(
                 "Either entry_id or name must be provided".to_string(),
@@ -140,30 +154,54 @@ impl VaulticMcpServer {
         }
     }
 
+    /// Resolve an entry to its id, display name, and tags for the consent
+    /// decision, in as few round-trips as possible. The name-based path
+    /// already has the summary; only the id-based path pays for a single
+    /// `list_summary` lookup (falling back to the raw id / no tags if that
+    /// fails). Tags feed the consent-policy auto-approve check.
+    async fn resolve_for_consent(
+        &self,
+        client: &mut AgentClient,
+        entry_id: Option<String>,
+        name: Option<String>,
+    ) -> Result<(Uuid, String, Vec<String>), McpError> {
+        let (id, summary) = self.resolve_entry(client, entry_id, name.clone()).await?;
+        let (display, tags) = match summary {
+            Some(s) => (s.name, s.tags),
+            None => match client
+                .list_summary()
+                .await
+                .ok()
+                .and_then(|es| es.into_iter().find(|e| e.id == id))
+            {
+                Some(e) => (e.name, e.tags),
+                None => (name.unwrap_or_else(|| id.to_string()), Vec::new()),
+            },
+        };
+        Ok((id, display, tags))
+    }
+
     /// Execute get_password tool.
     async fn get_password(&self, params: GetPasswordParams) -> Result<String, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name, entry_tags) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
+        self.context
+            .request_consent("get_password", &entry_name, &entry_tags)
+            .await?;
 
-        self.context.request_consent("get_password", &entry_name)?;
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(entry_name.clone())
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 
@@ -178,29 +216,25 @@ impl VaulticMcpServer {
         &self,
         params: GetCredentialParams,
     ) -> Result<CredentialResult, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name, entry_tags) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
-
         self.context
-            .request_consent("get_credential", &entry_name)?;
+            .request_consent("get_credential", &entry_name, &entry_tags)
+            .await?;
+
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let entry = client.get_entry(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(entry_name.clone())
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 
@@ -218,28 +252,25 @@ impl VaulticMcpServer {
 
     /// Execute get_totp tool.
     async fn get_totp(&self, params: GetTotpParams) -> Result<TotpResult, McpError> {
-        self.context.check_rate_limit().await?;
-
         let mut client = self.get_client().await?;
-        let id = self
-            .resolve_entry(&mut client, params.entry_id, params.name.clone())
+        let (id, entry_name, entry_tags) = self
+            .resolve_for_consent(&mut client, params.entry_id, params.name)
             .await?;
 
-        // Get entry name for consent prompt
-        let entries = client.list_summary().await?;
-        let entry_name = entries
-            .iter()
-            .find(|e| e.id == id)
-            .map(|e| e.name.clone())
-            .unwrap_or_else(|| params.name.unwrap_or_else(|| id.to_string()));
+        self.context
+            .request_consent("get_totp", &entry_name, &entry_tags)
+            .await?;
 
-        self.context.request_consent("get_totp", &entry_name)?;
+        // Consume a rate-limit token only for a consented disclosure — not for
+        // not-found lookups, parse errors, or denials.
+        self.context.check_rate_limit().await?;
 
         let totp = client.get_totp(id).await.map_err(|e| {
             if e.agent_code() == Some(ErrorCode::NotFound) {
                 McpError::NotFound(format!("{} has no TOTP configured", entry_name))
             } else {
-                McpError::Agent(e)
+                // Surfaces VaultLocked etc. via the From<ClientError> mapping.
+                McpError::from(e)
             }
         })?;
 
@@ -403,12 +434,10 @@ impl ServerHandler for VaulticMcpServer {
                     .map_err(|e| e.to_ai_message()),
 
                 "list_entries" => {
-                    let params: ListEntriesParams =
-                        serde_json::from_value(args).unwrap_or(ListEntriesParams {
-                            query: None,
-                            folder: None,
-                            tags: None,
-                        });
+                    let params: ListEntriesParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.list_entries(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -416,14 +445,9 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "search_entries" => {
-                    let params: SearchEntriesParams = match serde_json::from_value(args) {
+                    let params: SearchEntriesParams = match parse_tool_args(args) {
                         Ok(p) => p,
-                        Err(e) => {
-                            return Ok(CallToolResult::error(vec![Content::text(format!(
-                                "Invalid parameters: {}",
-                                e
-                            ))]))
-                        }
+                        Err(r) => return Ok(r),
                     };
                     self.search_entries(params)
                         .await
@@ -432,11 +456,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_password" => {
-                    let params: GetPasswordParams =
-                        serde_json::from_value(args).unwrap_or(GetPasswordParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetPasswordParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_password(params)
                         .await
                         .map(|r| json!({"password": r}))
@@ -444,11 +467,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_credential" => {
-                    let params: GetCredentialParams =
-                        serde_json::from_value(args).unwrap_or(GetCredentialParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetCredentialParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_credential(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -456,11 +478,10 @@ impl ServerHandler for VaulticMcpServer {
                 }
 
                 "get_totp" => {
-                    let params: GetTotpParams =
-                        serde_json::from_value(args).unwrap_or(GetTotpParams {
-                            entry_id: None,
-                            name: None,
-                        });
+                    let params: GetTotpParams = match parse_tool_args(args) {
+                        Ok(p) => p,
+                        Err(r) => return Ok(r),
+                    };
                     self.get_totp(params)
                         .await
                         .map(|r| serde_json::to_value(r).unwrap())
@@ -488,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_server_info() {
-        let server = VaulticMcpServer::new(false);
+        let server = VaulticMcpServer::new(false, McpConfig::default());
         let info = server.get_info();
         assert_eq!(info.server_info.name, "vaultic-mcp");
     }
@@ -503,5 +524,22 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "get_password"));
         assert!(tools.iter().any(|t| t.name == "get_credential"));
         assert!(tools.iter().any(|t| t.name == "get_totp"));
+    }
+
+    #[test]
+    fn parse_tool_args_rejects_wrong_typed_field() {
+        // `name` must be a string; a numeric value is a caller error and must
+        // surface, not silently collapse to defaults (which would then look
+        // like "no entry_id or name provided" despite a valid entry_id).
+        let bad = json!({"entry_id": "11111111-1111-1111-1111-111111111111", "name": 123});
+        let parsed: Result<GetPasswordParams, _> = parse_tool_args(bad);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn parse_tool_args_accepts_empty_object() {
+        // All fields are optional, so an empty object is valid.
+        let parsed: Result<GetPasswordParams, _> = parse_tool_args(json!({}));
+        assert!(parsed.is_ok());
     }
 }

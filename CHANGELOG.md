@@ -7,8 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — MCP server (`vaultic-mcp`) ([#43](https://github.com/punitmishra/vaultic/pull/43))
+
+A fourth binary: an [MCP](https://modelcontextprotocol.io/) server that
+lets AI clients (Claude Code, etc.) read vault credentials without the
+user pasting secrets into chat.
+
+- Bridges MCP (JSON-RPC over stdio) to `vaultic-agent`'s Unix socket, so
+  the vault must be unlocked via `vaultic unlock` first — no password
+  ever crosses MCP.
+- Six tools. Read-only (`vault_status`, `list_entries`,
+  `search_entries`) need no consent; secret-returning tools
+  (`get_password`, `get_credential`, `get_totp`) prompt for explicit
+  y/N consent on stderr and are rate-limited to 10 requests/minute.
+- All credentials stay local; nothing is sent to AI servers.
+- `--no-consent` (trusted-env only), `--socket <path>`, and `--verbose`
+  flags. New module `src/mcp/` (server, tools, error) and binary
+  `src/bin/vaultic_mcp.rs`. Documented in
+  [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md).
+
+### Added — MCP consent-policy config
+
+- A `vaultic-mcp` config (`~/.config/vaultic/mcp.toml`, or `--config <path>`)
+  pre-authorizes specific entries for secret access without an interactive
+  prompt, via `[consent] auto_approve_names` (case-insensitive exact) and
+  `auto_approve_tags`. This is the practical path to using `vaultic-mcp` from
+  a no-TTY GUI host. Empty/absent config = unchanged behavior; auto-approved
+  disclosures are logged to stderr. New module `src/mcp/config.rs`.
+
+### Fixed — MCP correctness pass
+
+A review of the new `vaultic-mcp` server found and fixed five bugs before
+its first tagged release:
+
+- **Consent no longer collides with the protocol.** The consent prompt read
+  from stdin, which the MCP stdio transport owns — a consent-gated tool would
+  steal a JSON-RPC frame or hang. Consent now reads the controlling terminal
+  (`/dev/tty`) via `spawn_blocking`, and **fails closed** (new
+  `ConsentUnavailable` error) when there is no terminal.
+- **Locked-vault errors are actionable again.** `VaultLocked` was never
+  constructed, so a locked vault (the most common state) returned a raw
+  `Agent error: ...`. It now surfaces `McpError::VaultLocked` with the
+  "run `vaultic unlock`" hint.
+- **Rate limiting counts only consented disclosures**, not not-found lookups,
+  malformed requests, or denials.
+- **Malformed tool arguments are rejected** with a clear message instead of
+  silently collapsing to defaults (which could ignore a valid `entry_id` or
+  turn `list_entries` into list-everything).
+- **Removed a redundant `list_summary` round-trip** on every secret fetch.
+
+### Changed
+
+- **`sequoia-openpgp` 1.21 → 2.3**
+  ([#42](https://github.com/punitmishra/vaultic/pull/42)) clears
+  RUSTSEC-2025-0136. The `gpg` feature is still off by default; this
+  removes the advisory for users who opt in.
+
 See [open issues](https://github.com/punitmishra/vaultic/issues) for what's
-in flight. Notable next-up: `bincode 1 → 2` in
+still in flight. Notable next-up: cut **v2.3.0** and publish to crates.io
+(see [`ROADMAP.md`](ROADMAP.md) § Release chores), then `bincode 1 → 2` in
 [#6](https://github.com/punitmishra/vaultic/issues/6) Phase B and the
 mlock follow-through in [#24](https://github.com/punitmishra/vaultic/issues/24).
 
@@ -16,10 +73,11 @@ mlock follow-through in [#24](https://github.com/punitmishra/vaultic/issues/24).
 
 The CLI and the daemon now share unlock state. When `vaultic-agent` is
 running, `vaultic` routes through it; when it isn't, the CLI behaves
-exactly as before. This release also adds the OSS-foundation docs
-(`SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `VIBE_CODING.md`)
-that close [#21](https://github.com/punitmishra/vaultic/issues/21) and
-the broader repo-hygiene work.
+exactly as before. This closes
+[#21](https://github.com/punitmishra/vaultic/issues/21) (the
+CLI ↔ daemon bridge, detailed below). The release also adds the
+OSS-foundation docs (`SECURITY.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`,
+`VIBE_CODING.md`) that round out the broader repo-hygiene work.
 
 ### Added — CLI ↔ daemon bridge ([#21](https://github.com/punitmishra/vaultic/issues/21))
 
@@ -194,7 +252,7 @@ named palettes are tuned to coherent looks across CLI and GUI.
 - The CLI's `vaultic unlock` (session-file model) and the daemon
   (in-memory key model) are **not bridged**. Unlocking via CLI
   doesn't make the GUI see "unlocked". Bridging is a separate
-  workstream.
+  workstream. _(Resolved in 2.2.0 — [#21](https://github.com/punitmishra/vaultic/issues/21).)_
 - Daemon is **Unix only**: Linux + macOS. Windows is deferred
   (named-pipe transport, peer-cred equivalent).
 - No daemonization or `launchd` / `systemd` integration; users

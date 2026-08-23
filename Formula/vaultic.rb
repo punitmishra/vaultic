@@ -37,11 +37,12 @@ class Vaultic < Formula
   def install
     # The release tarballs ship the binaries available on each target.
     # macOS (Apple Silicon and Intel) and Linux x86_64 ship all three;
-    # Linux ARM64 ships the CLI + agent only — no GUI binary on cross
-    # builds. Install whichever are present.
+    # Cross builds (Linux ARM64 / musl) ship the CLI + agent + MCP
+    # server but no GUI binary. Install whichever are present.
     bin.install "vaultic"
     bin.install "vaultic-agent" if File.exist?("vaultic-agent")
     bin.install "vaultic-gui" if File.exist?("vaultic-gui")
+    bin.install "vaultic-mcp" if File.exist?("vaultic-mcp")
 
     # Generate shell completions for the CLI.
     generate_completions_from_executable(bin/"vaultic", "completions")
@@ -67,11 +68,13 @@ class Vaultic < Formula
       For Git credential helper:
         git config --global credential.helper vaultic
 
-      The optional Unix-socket daemon (`vaultic-agent`) and desktop GUI
-      (`vaultic-gui`) are installed alongside `vaultic` on macOS and
-      Linux x86_64. See:
+      The optional Unix-socket daemon (`vaultic-agent`), desktop GUI
+      (`vaultic-gui`), and MCP server for AI clients (`vaultic-mcp`)
+      are installed alongside `vaultic` (the GUI is macOS / Linux
+      x86_64 only). See:
         vaultic-agent --help
         vaultic-gui --help
+        vaultic-mcp --help
     EOS
   end
 
