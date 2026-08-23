@@ -12,8 +12,10 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use zeroize::Zeroize;
+
+use crate::agent::locked_key::LockedMasterKey;
 use crate::agent::protocol::{EntrySummary, StatusView, TotpView};
-use crate::crypto::MasterKey;
 use crate::models::{SearchFilter, VaultEntry};
 use crate::storage::VaultStorage;
 
@@ -73,7 +75,9 @@ struct Inner {
 /// drops it within its own scope.
 struct OpenVault {
     vault_path: PathBuf,
-    master_key: MasterKey,
+    /// Held key, pinned into RAM with `mlock` so it can't be swapped to disk
+    /// (issue #24). Zeroized + munlocked on drop.
+    master_key: LockedMasterKey,
 }
 
 impl OpenVault {
@@ -83,8 +87,9 @@ impl OpenVault {
     fn open_storage(&self) -> StateResult<VaultStorage> {
         let mut storage =
             VaultStorage::open(&self.vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
+        let master_key = self.master_key.master_key();
         storage
-            .unlock(&self.master_key)
+            .unlock(&master_key)
             .map_err(classify_unlock_error)?;
         Ok(storage)
     }
@@ -132,15 +137,21 @@ impl AgentState {
     /// the agent doesn't keep sled open between calls so the CLI / TUI /
     /// other tools can share the same database.
     pub async fn unlock(&self, vault_path: PathBuf, derived_key_hex: &str) -> StateResult<()> {
-        let key_bytes = decode_key_hex(derived_key_hex)?;
-        let master_key = MasterKey::from_bytes(key_bytes);
+        let mut key_bytes = decode_key_hex(derived_key_hex)?;
+        // Pin the held copy into RAM immediately; the transient stack copy in
+        // `key_bytes` is zeroized below once it's no longer needed.
+        let master_key = LockedMasterKey::new(key_bytes);
+        key_bytes.zeroize();
 
         // Verify by opening + unlocking. The handle is dropped at the end
         // of this scope; we don't keep it.
         {
+            let verify_key = master_key.master_key();
             let mut storage =
                 VaultStorage::open(&vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
-            storage.unlock(&master_key).map_err(classify_unlock_error)?;
+            storage
+                .unlock(&verify_key)
+                .map_err(classify_unlock_error)?;
         }
 
         let mut inner = self.inner.lock().await;
