@@ -16,7 +16,7 @@ This document provides context for Claude to continue developing Vaultic.
 
 ## Current Status: current tree post-v2.2.0 (MCP + sequoia 2.3 → v2.3.0)
 
-### Checkpoint: 2026-06-29
+### Checkpoint: 2026-08-22
 
 > Released v2.2.0 shipped three binaries (CLI/TUI, daemon, GUI) + the
 > CLI↔daemon bridge. `vaultic-mcp` (#43) and the sequoia 2.3 bump (#42)
@@ -25,14 +25,14 @@ This document provides context for Claude to continue developing Vaultic.
 
 **Build Status**: COMPILING AND RUNNING (four binaries; `vaultic-mcp` unreleased → v2.3.0)
 **Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app), `vaultic-mcp` (MCP server)
-**Tests**: 439 passing (lib + bin + integration + doc)
+**Tests**: 450 passing (lib + bin + integration + doc)
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED + 4 themes (default/dracula/solarized-dark/monochrome)
 **GUI**: FULLY IMPLEMENTED — unlock + list + detail + live TOTP + 4 themes + keyboard nav
 **Daemon**: FULLY IMPLEMENTED — Unix socket, peer-cred auth, 9 protocol methods, inactivity lock
 **MCP**: FULLY IMPLEMENTED — Model Context Protocol server for AI tool integration
 **Benchmarks**: `cargo bench --bench vault_ops` covers list/search/get/add/unlock against 10k entries
-**Audit**: sequoia advisory RUSTSEC-2025-0136 cleared by the 2.3 bump (#42); remaining `cargo audit` output is unmaintained-transitive warnings
+**Audit**: `cargo audit` is currently RED — 6 vulnerabilities + 11 warnings across ~702 deps (RUSTSEC-2025-0136/sequoia was cleared by the 2.3 bump #42). Open vulns: crossbeam-epoch, quick-xml ×2, quinn-proto, rmcp (DNS rebinding in the *Streamable HTTP* transport — `vaultic-mcp` uses stdio, likely unreachable), webbrowser. The `deps/rustsec-dep-bumps` branch clears 4 (crossbeam-epoch/quinn-proto/webbrowser + anyhow unsound); quick-xml ×2 + rmcp remain. `.github/workflows/audit.yml` runs but is `continue-on-error: true` (non-gating).
 **CI/CD**: GitHub Actions configured; currently billing-locked (issue #8)
 **Documentation**: CHANGELOG.md, slim ROADMAP.md, AGENT_PROTOCOL.md, MCP_SERVER.md, comprehensive CLAUDE.md
 **GitHub**: https://github.com/punitmishra/vaultic
@@ -41,7 +41,7 @@ This document provides context for Claude to continue developing Vaultic.
 ```bash
 # Verify everything works
 cargo build --release        # Builds four binaries
-cargo test --release         # 439 passing
+cargo test --release         # 450 passing
 
 # CLI
 ./target/release/vaultic --help
@@ -133,7 +133,7 @@ cargo test --release         # 439 passing
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
 | `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
 | `mcp` | NEW | ~500 | Model Context Protocol server for AI tool integration |
-| `tests` | COMPLETE | ~900 | 439 tests (unit, integration, doctests) |
+| `tests` | COMPLETE | ~900 | 450 tests (unit, integration, doctests) |
 
 ---
 
@@ -260,10 +260,10 @@ vaultic tui --theme dracula
 ## Test Results (Latest)
 
 ```
-cargo test: 439 tests passing
+cargo test: 450 tests passing
+  - 204 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
   - 182 bin tests (CLI parsing, commands)
-  - 193 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
-  - 59 integration tests (end-to-end workflows + agent protocol)
+  - 59 integration tests (44 end-to-end + 15 agent protocol)
   - 5 doctests (code examples in documentation)
 
 cargo build --release: Success
@@ -431,7 +431,7 @@ cargo build                 # Debug build
 cargo build --release       # Release build
 
 # Test
-cargo test                  # All tests (439 passing)
+cargo test                  # All tests (450 passing)
 cargo test tui              # TUI tests only
 cargo test storage          # Storage tests only
 
@@ -475,7 +475,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **439 tests passing** - Keep them green (182 bin + 193 lib + 59 integration + 5 doc)
+2. **450 tests passing** - Keep them green (204 lib + 182 bin + 59 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
