@@ -35,7 +35,7 @@ like two separate tools. Closing it is two paired issues:
 |---|---|---|
 | Dependency hardening — Phase B (`bincode 1 → 2`) | [#6](https://github.com/punitmishra/vaultic/issues/6) | The remaining unmaintained-direct-dep. Touches every encrypted vault entry; needs a vault format migration design. |
 | Mlock the unlocked master key | [#24](https://github.com/punitmishra/vaultic/issues/24) | Prevent the daemon's master-key region from swapping to disk under memory pressure. |
-| Threat model document | [#26](https://github.com/punitmishra/vaultic/issues/26) | Formalize what we defend against, what we don't, and why. |
+| Threat model document | [#26](https://github.com/punitmishra/vaultic/issues/26) | ✅ Addressed by [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — assets, trust boundaries, adversary classes, non-goals, and known gaps. |
 
 ### Feature completions
 
