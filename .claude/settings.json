@@ -1,26 +1,31 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cargo:*)",
-      "Bash(git:*)",
-      "Bash(./target/release/vaultic:*)",
       "Read",
       "Write",
       "Edit",
       "Glob",
-      "Grep"
+      "Grep",
+      "Bash(cargo:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(./target/release/vaultic:*)",
+      "Bash(./target/release/vaultic-agent:*)",
+      "Bash(./target/release/vaultic-mcp:*)"
     ],
     "deny": []
   },
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "cargo build --release 2>&1 | tail -5"
-      },
-      {
-        "type": "command",
-        "command": "cargo test 2>&1 | tail -10"
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo check 2>&1 | tail -15",
+            "timeout": 120
+          }
+        ]
       }
     ]
   }
