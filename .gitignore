@@ -26,3 +26,9 @@ Thumbs.db
 # Vault data (never commit real vaults!)
 .vaultic/
 *.vaultic
+
+# Local agent/dev setup (not part of the project)
+.claude/CLAUDE.md
+.claude/agents/
+.claude/worktrees/
+*.bkp
