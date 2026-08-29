@@ -37,9 +37,12 @@ impl LockedMasterKey {
     ///
     /// If locking fails the key is still held (and zeroized on drop); only the
     /// swap-protection guarantee is lost, and a warning is logged.
-    pub fn new(key: [u8; 32]) -> Self {
+    pub fn new(mut key: [u8; 32]) -> Self {
         let bytes = Box::new(key);
         let locked = lock_region(bytes.as_ptr(), bytes.len());
+        // `key` is a `Copy` stack duplicate left behind by `Box::new`; wipe it
+        // so the only surviving copy is the (soon-to-be-mlocked) heap buffer.
+        key.zeroize();
         Self { bytes, locked }
     }
 
