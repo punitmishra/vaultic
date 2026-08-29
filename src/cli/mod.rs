@@ -2687,7 +2687,7 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         || name.contains("SECRET")
                         || name.contains("KEY")
                     {
-                        format!("{}...", &value.chars().take(4).collect::<String>())
+                        format!("{}...", value.chars().take(4).collect::<String>())
                     } else {
                         value.clone()
                     };
