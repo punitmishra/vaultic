@@ -58,7 +58,7 @@ use sled::{Db, Tree};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::crypto::{Cipher, CryptoError, IdentityKeyPair, MasterKey};
+use crate::crypto::{Cipher, CryptoError, IdentityKeyPair, KeyDeriver, MasterKey};
 use crate::models::{
     AuditLogEntry, KdfParams, SearchFilter, SharedSecret, UserIdentity, VaultEntry, VaultMetadata,
 };
@@ -181,6 +181,58 @@ impl VaultStorage {
         self.metadata = Some(metadata);
 
         Ok(())
+    }
+
+    /// Derive the master key for this (already-open) vault from a password and
+    /// leave the vault unlocked, transparently handling legacy vaults.
+    ///
+    /// The honest derivation over the recorded KDF parameters is tried first;
+    /// if it fails to unlock, the pre-2.3 legacy derivation
+    /// ([`KeyDeriver::derive_legacy_default`]) is tried as a fallback. Returns
+    /// the working master key together with a flag that is `true` when the
+    /// legacy fallback was the one that succeeded — a signal that the on-disk
+    /// KDF metadata is lying and can be self-healed via
+    /// [`heal_legacy_kdf_params`](Self::heal_legacy_kdf_params). When both
+    /// derivations fail (a genuinely wrong password), the honest attempt's
+    /// error is returned. Does not modify anything on disk.
+    pub fn unlock_with_password_ext(
+        &mut self,
+        password: &[u8],
+    ) -> StorageResult<(MasterKey, bool)> {
+        let params = KdfParamsStorage::load(&self.path)?;
+
+        let honest =
+            KeyDeriver::derive_from_password(password, &params).map_err(StorageError::Crypto)?;
+        match self.unlock(&honest) {
+            Ok(()) => Ok((honest, false)),
+            Err(honest_err) => {
+                // Legacy fallback: pre-2.3 CLI vaults derived the master key
+                // with `Argon2::default()`, ignoring the recorded parameters.
+                let legacy = KeyDeriver::derive_legacy_default(password, &params.salt)
+                    .map_err(StorageError::Crypto)?;
+                match self.unlock(&legacy) {
+                    Ok(()) => Ok((legacy, true)),
+                    // Neither key worked: surface the honest error, since that
+                    // is the derivation the vault is expected to use.
+                    Err(_) => Err(honest_err),
+                }
+            }
+        }
+    }
+
+    /// Rewrite `kdf_params.json` so it records the *true* Argon2-default
+    /// parameters, correcting a legacy vault whose stored metadata lies about
+    /// the parameters that were actually applied.
+    ///
+    /// This is metadata-only: the vault key is unchanged, so no entries are
+    /// re-encrypted. Afterwards the honest [`KeyDeriver::derive_from_password`]
+    /// derivation reproduces the same key, which restores CLI↔GUI/agent interop
+    /// (the daemon and GUI always honor the stored parameters) and makes
+    /// subsequent unlocks single-derivation.
+    pub fn heal_legacy_kdf_params(&self) -> StorageResult<()> {
+        let params = KdfParamsStorage::load(&self.path)?;
+        let healed = KeyDeriver::legacy_default_params(params.salt);
+        KdfParamsStorage::save(&self.path, &healed)
     }
 
     /// Lock the vault (clear cipher and metadata from memory)
@@ -791,5 +843,118 @@ mod tests {
         let filter = SearchFilter::new().with_tags(vec!["work".to_string()]);
         let results = storage.search_entries(&filter).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    // Small, fast KDF parameters for exercising the unlock paths without
+    // paying for realistic Argon2 cost on every test.
+    fn cheap_params(salt: &[u8]) -> KdfParams {
+        KdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost: 1024,
+            time_cost: 1,
+            parallelism: 1,
+            salt: salt.to_vec(),
+        }
+    }
+
+    #[test]
+    fn test_unlock_with_password_honest_vault() {
+        // A vault created honoring its recorded parameters (as the CLI now
+        // does) unlocks via the honest path with no legacy fallback, and its
+        // key equals a fresh derivation over the stored parameters — which is
+        // exactly what the GUI/agent do. This is the CLI↔GUI interop guarantee.
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let password = b"interop-password";
+        let params = cheap_params(b"interop-salt-1234");
+        let master_key = KeyDeriver::derive_from_password(password, &params).unwrap();
+
+        let storage = VaultStorage::create(
+            &vault_path,
+            "V",
+            &master_key,
+            params.clone(),
+            "fp".to_string(),
+        )
+        .unwrap();
+        drop(storage);
+
+        let mut storage = VaultStorage::open(&vault_path).unwrap();
+        let (key, was_legacy) = storage.unlock_with_password_ext(password).unwrap();
+        assert!(
+            !was_legacy,
+            "honest vault must not need the legacy fallback"
+        );
+
+        let loaded = KdfParamsStorage::load(&vault_path).unwrap();
+        let gui_key = KeyDeriver::derive_from_password(password, &loaded).unwrap();
+        assert_eq!(
+            key.as_bytes(),
+            gui_key.as_bytes(),
+            "CLI key must match the GUI/agent derivation over the stored params"
+        );
+    }
+
+    #[test]
+    fn test_unlock_with_password_legacy_fallback_and_heal() {
+        // Simulate a pre-2.3 CLI vault: the metadata is encrypted under the key
+        // Argon2::default() produces, but kdf_params.json *lies* about the cost
+        // parameters (they were recorded but never actually applied).
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let password = b"legacy-password";
+        let salt = b"legacy-salt-16by".to_vec();
+
+        let legacy_key = KeyDeriver::derive_legacy_default(password, &salt).unwrap();
+        let lying_params = KdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost: 8192, // recorded but never applied (real key is at Argon2 default)
+            time_cost: 3,
+            parallelism: 4,
+            salt: salt.clone(),
+        };
+        let storage = VaultStorage::create(
+            &vault_path,
+            "Legacy",
+            &legacy_key,
+            lying_params,
+            "fp".to_string(),
+        )
+        .unwrap();
+        drop(storage);
+
+        // Honest derivation over the lying params fails; the fallback wins.
+        let mut storage = VaultStorage::open(&vault_path).unwrap();
+        let (key, was_legacy) = storage.unlock_with_password_ext(password).unwrap();
+        assert!(was_legacy, "legacy vault must be opened via the fallback");
+        assert_eq!(key.as_bytes(), legacy_key.as_bytes());
+
+        // Self-heal, then confirm the honest path alone now works and yields
+        // the same key (metadata-only correction, no re-encryption).
+        storage.heal_legacy_kdf_params().unwrap();
+        drop(storage);
+
+        let mut storage = VaultStorage::open(&vault_path).unwrap();
+        let (key2, was_legacy2) = storage.unlock_with_password_ext(password).unwrap();
+        assert!(!was_legacy2, "after healing, no fallback should be needed");
+        assert_eq!(key2.as_bytes(), legacy_key.as_bytes());
+    }
+
+    #[test]
+    fn test_unlock_with_password_wrong_password_fails() {
+        // A genuinely wrong password fails both the honest and legacy paths.
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let params = cheap_params(b"wrongpw-salt-16b");
+        let master_key = KeyDeriver::derive_from_password(b"right-password", &params).unwrap();
+        let storage =
+            VaultStorage::create(&vault_path, "V", &master_key, params, "fp".to_string()).unwrap();
+        drop(storage);
+
+        let mut storage = VaultStorage::open(&vault_path).unwrap();
+        assert!(storage.unlock_with_password_ext(b"wrong-password").is_err());
     }
 }

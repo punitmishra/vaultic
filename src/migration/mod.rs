@@ -12,7 +12,6 @@ use uuid::Uuid;
 use crate::crypto::kek::derive_from_password;
 use crate::crypto::keys::{MethodData, UnlockMethod, VaultKey, VaultKeyring};
 use crate::crypto::wrap::wrap_vault_key;
-use crate::crypto::KeyDeriver;
 use crate::storage::keyring::{detect_vault_version, KeyringStorage, VaultVersion};
 use crate::storage::{KdfParamsStorage, StorageError, VaultStorage};
 
@@ -58,14 +57,10 @@ impl VaultMigrator {
 
     /// Perform a dry run of the migration (doesn't modify anything)
     pub fn dry_run(&self, password: &str) -> Result<MigrationReport, StorageError> {
-        // Verify password works with current vault
-        let kdf_params = KdfParamsStorage::load(&self.vault_path)?;
-        let master_key = KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
-            .map_err(StorageError::Crypto)?;
-
-        // Try to open and unlock the vault
+        // Verify the password works with the current vault, handling legacy
+        // pre-2.3 CLI vaults whose recorded KDF parameters were never applied.
         let mut storage = VaultStorage::open(&self.vault_path)?;
-        storage.unlock(&master_key)?;
+        storage.unlock_with_password_ext(password.as_bytes())?;
 
         let entry_count = storage.list_entries()?.len();
         let vault_id = storage
@@ -96,20 +91,21 @@ impl VaultMigrator {
             return Err(StorageError::InvalidData);
         }
 
-        // Step 1: Load existing KDF params and derive the old master key
-        let kdf_params = KdfParamsStorage::load(&self.vault_path)?;
-        let old_master_key = KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
-            .map_err(StorageError::Crypto)?;
-
-        // Step 2: Open and unlock the vault with old key
+        // Step 1: Open the vault and derive the old master key. This handles
+        // legacy pre-2.3 CLI vaults whose recorded KDF parameters were never
+        // applied, so migration no longer fails on them.
         let mut storage = VaultStorage::open(&self.vault_path)?;
-        storage.unlock(&old_master_key)?;
+        let (old_master_key, _was_legacy) =
+            storage.unlock_with_password_ext(password.as_bytes())?;
 
         let entries = storage.list_entries()?;
         let vault_id = storage
             .metadata()
             .map(|m| m.id)
             .unwrap_or_else(Uuid::new_v4);
+
+        // Step 2: Load the KDF params for the v2 KEK derivation.
+        let kdf_params = KdfParamsStorage::load(&self.vault_path)?;
 
         // Step 3: Create backup of kdf_params.json
         let backup_path = self.backup_kdf_params()?;
@@ -223,7 +219,7 @@ pub fn migrate_vault(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::MasterKey;
+    use crate::crypto::{KeyDeriver, MasterKey};
     use crate::models::KdfParams;
     use tempfile::tempdir;
 

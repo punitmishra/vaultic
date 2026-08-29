@@ -283,6 +283,45 @@ impl KeyDeriver {
             salt: salt.as_str().as_bytes().to_vec(),
         }
     }
+
+    /// Derive a master key the way pre-2.3 CLI vaults did.
+    ///
+    /// Before the CLI honored its own recorded KDF metadata, `vaultic init`
+    /// and `vaultic unlock` derived the master key with `Argon2::default()`
+    /// (19 MiB / t2 / p1) and *ignored* the cost parameters written to
+    /// `kdf_params.json`. Those files therefore record parameters that were
+    /// never actually applied. This reproduces that legacy derivation from the
+    /// salt alone, so such vaults can still be opened; it is only ever used as
+    /// a fallback after the honest [`derive_from_password`](Self::derive_from_password)
+    /// derivation fails to unlock.
+    pub fn derive_legacy_default(password: &[u8], salt: &[u8]) -> CryptoResult<MasterKey> {
+        let mut output = [0u8; 32];
+        Argon2::default()
+            .hash_password_into(password, salt, &mut output)
+            .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
+        Ok(MasterKey(output))
+    }
+
+    /// The KDF parameters `Argon2::default()` actually applies, paired with the
+    /// given salt.
+    ///
+    /// Recording these makes a healed legacy vault's metadata *honest*: feeding
+    /// them back through [`derive_from_password`](Self::derive_from_password)
+    /// reproduces the exact key [`derive_legacy_default`](Self::derive_legacy_default)
+    /// produced, so the correction is metadata-only and requires no
+    /// re-encryption. (`hash_password_into` sizes its output from the 32-byte
+    /// buffer, so `Params::default()`'s `output_len: None` and the explicit
+    /// `Some(32)` used by `derive_from_password` yield identical bytes.)
+    pub fn legacy_default_params(salt: Vec<u8>) -> KdfParams {
+        let p = Params::default();
+        KdfParams {
+            algorithm: "argon2id".to_string(),
+            memory_cost: p.m_cost(),
+            time_cost: p.t_cost(),
+            parallelism: p.p_cost(),
+            salt,
+        }
+    }
 }
 
 /// Identity keypair for signing and key exchange
@@ -667,6 +706,34 @@ mod tests {
         let key2 = KeyDeriver::derive_from_password(password, &params).unwrap();
 
         assert_eq!(key1.as_bytes(), key2.as_bytes());
+    }
+
+    #[test]
+    fn test_legacy_default_heal_reproduces_key() {
+        // The self-heal in `VaultStorage::heal_legacy_kdf_params` rewrites
+        // `kdf_params.json` with `legacy_default_params(salt)` and relies on
+        // the honest `derive_from_password` path then reproducing the *exact*
+        // key the legacy `Argon2::default()` path produced — otherwise healing
+        // would silently brick the vault. Lock that invariant in.
+        let password = b"correct horse battery staple";
+        let salt = b"a-sixteen-byte!!".to_vec();
+
+        let legacy = KeyDeriver::derive_legacy_default(password, &salt).unwrap();
+
+        let healed_params = KeyDeriver::legacy_default_params(salt.clone());
+        let via_honest = KeyDeriver::derive_from_password(password, &healed_params).unwrap();
+
+        assert_eq!(
+            legacy.as_bytes(),
+            via_honest.as_bytes(),
+            "healed params must reproduce the legacy key with no re-encryption"
+        );
+
+        // The recorded parameters must match what Argon2::default() applies.
+        let d = Params::default();
+        assert_eq!(healed_params.memory_cost, d.m_cost());
+        assert_eq!(healed_params.time_cost, d.t_cost());
+        assert_eq!(healed_params.parallelism, d.p_cost());
     }
 
     #[test]
