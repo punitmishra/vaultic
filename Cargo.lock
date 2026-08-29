@@ -5896,6 +5896,7 @@ dependencies = [
  "hmac",
  "image",
  "indicatif",
+ "libc",
  "passwords",
  "qrcode",
  "rand 0.8.6",

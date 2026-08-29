@@ -74,6 +74,9 @@ toml = "0.8"
 fuzzy-matcher = "0.3"
 passwords = "3.1"
 
+# mlock the daemon's held master key (already present transitively)
+libc = "0.2"
+
 # QR code for sharing and scanning
 qrcode = "0.14"
 rqrr = "0.10"

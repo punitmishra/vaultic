@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod keys;
+pub mod locked_key;
 pub mod paths;
 pub mod protocol;
 pub mod server;
