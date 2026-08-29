@@ -1121,8 +1121,10 @@ pub fn generate_and_display_password(
     Output::field("Entropy", &format!("{:.1} bits", entropy));
     Output::field("Length", &length.to_string());
 
-    if copy && copy_to_clipboard_internal(&password).is_ok() {
-        Output::success("Copied to clipboard (clears in 30s)");
+    if copy {
+        // Use the auto-clearing helper so a generated password does not linger
+        // on the clipboard indefinitely (it also prints the success message).
+        let _ = copy_to_clipboard(&password, 30);
     }
 
     println!();
