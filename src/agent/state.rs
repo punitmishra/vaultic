@@ -12,7 +12,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::agent::locked_key::LockedMasterKey;
 use crate::agent::protocol::{EntrySummary, StatusView, TotpView};
@@ -135,11 +135,12 @@ impl AgentState {
     /// the agent doesn't keep sled open between calls so the CLI / TUI /
     /// other tools can share the same database.
     pub async fn unlock(&self, vault_path: PathBuf, derived_key_hex: &str) -> StateResult<()> {
-        let mut key_bytes = decode_key_hex(derived_key_hex)?;
-        // Pin the held copy into RAM immediately; the transient stack copy in
-        // `key_bytes` is zeroized below once it's no longer needed.
-        let master_key = LockedMasterKey::new(key_bytes);
-        key_bytes.zeroize();
+        // `decode_key_hex` hands back a `Zeroizing` buffer, so the decoded
+        // bytes are wiped when it drops at the end of this method.
+        // `LockedMasterKey::new` takes its own copy and zeroizes the transient
+        // argument internally after boxing.
+        let key_bytes = decode_key_hex(derived_key_hex)?;
+        let master_key = LockedMasterKey::new(*key_bytes);
 
         // Verify by opening + unlocking. The handle is dropped at the end
         // of this scope; we don't keep it.
@@ -271,11 +272,11 @@ fn entry_to_summary(entry: &VaultEntry) -> EntrySummary {
     }
 }
 
-fn decode_key_hex(s: &str) -> StateResult<[u8; 32]> {
+fn decode_key_hex(s: &str) -> StateResult<Zeroizing<[u8; 32]>> {
     if s.len() != 64 {
         return Err(StateError::BadKeyLength(s.len() / 2));
     }
-    let mut out = [0u8; 32];
+    let mut out = Zeroizing::new([0u8; 32]);
     for i in 0..32 {
         let byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
             .map_err(|e| StateError::InvalidHex(e.to_string()))?;
@@ -305,7 +306,7 @@ mod tests {
     fn decode_key_hex_accepts_32_bytes() {
         let s = "ab".repeat(32);
         let bytes = decode_key_hex(&s).unwrap();
-        assert_eq!(bytes, [0xabu8; 32]);
+        assert_eq!(*bytes, [0xabu8; 32]);
     }
 
     #[test]

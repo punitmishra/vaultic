@@ -205,19 +205,46 @@ impl App {
         }
     }
 
-    /// Copy password to clipboard
+    /// Copy password to clipboard, auto-clearing after 30s.
     pub fn copy_password(&mut self) -> TuiResult<()> {
-        if let Some(entry) = self.selected_entry() {
-            if let Some(password) = &entry.password {
+        // Extract owned values first so we don't hold an immutable borrow of
+        // `self` across the status-message mutation below.
+        let copied = self.selected_entry().and_then(|entry| {
+            entry
+                .password
+                .as_ref()
+                .map(|p| (entry.name.clone(), p.expose().to_string()))
+        });
+
+        match copied {
+            Some((name, password)) => {
                 let mut clipboard = arboard::Clipboard::new()
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
                 clipboard
-                    .set_text(password.expose().to_string())
+                    .set_text(password.clone())
                     .map_err(|e| TuiError::Terminal(format!("Clipboard error: {}", e)))?;
 
-                self.status_message =
-                    Some(format!("Password for '{}' copied to clipboard", entry.name));
-            } else {
+                // Clear the clipboard after 30s, but only if it still holds
+                // this password — don't clobber whatever the user copied since.
+                // Runs off-thread so the TUI event loop is never blocked, and
+                // writes nothing to stdout (which would corrupt the display).
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(30));
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        if let Ok(current) = clipboard.get_text() {
+                            if current == password {
+                                let _ = clipboard.set_text(String::new());
+                            }
+                        }
+                    }
+                });
+
+                self.status_message = Some(format!(
+                    "Password for '{}' copied to clipboard (clears in 30s)",
+                    name
+                ));
+            }
+            None => {
                 self.status_message = Some("No password for this entry".to_string());
             }
         }
