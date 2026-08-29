@@ -88,9 +88,7 @@ impl OpenVault {
         let mut storage =
             VaultStorage::open(&self.vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
         let master_key = self.master_key.master_key();
-        storage
-            .unlock(&master_key)
-            .map_err(classify_unlock_error)?;
+        storage.unlock(&master_key).map_err(classify_unlock_error)?;
         Ok(storage)
     }
 }
@@ -149,9 +147,7 @@ impl AgentState {
             let verify_key = master_key.master_key();
             let mut storage =
                 VaultStorage::open(&vault_path).map_err(|e| StateError::VaultIo(e.to_string()))?;
-            storage
-                .unlock(&verify_key)
-                .map_err(classify_unlock_error)?;
+            storage.unlock(&verify_key).map_err(classify_unlock_error)?;
         }
 
         let mut inner = self.inner.lock().await;

@@ -94,7 +94,9 @@ fn unlock_region(ptr: *const u8, len: usize) {
 
 #[cfg(not(unix))]
 fn lock_region(_ptr: *const u8, _len: usize) -> bool {
-    tracing::warn!("memory locking unsupported on this platform; master key pages may be swappable");
+    tracing::warn!(
+        "memory locking unsupported on this platform; master key pages may be swappable"
+    );
     false
 }
 
