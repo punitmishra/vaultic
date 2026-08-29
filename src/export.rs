@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::crypto::{Cipher, CryptoError, MasterKey};
 use crate::models::VaultEntry;
+use crate::serialization::encode;
 
 /// Export errors
 #[derive(Debug, Error)]
@@ -95,8 +96,7 @@ pub fn export_encrypted(entries: &[VaultEntry], master_key: &MasterKey) -> Expor
         return Err(ExportError::NoEntries);
     }
 
-    let serialized =
-        bincode::serialize(entries).map_err(|e| ExportError::Serialization(e.to_string()))?;
+    let serialized = encode(entries).map_err(|e| ExportError::Serialization(e.to_string()))?;
 
     let derived = master_key.derive_keys();
     let cipher = Cipher::new(&derived.encryption_key);
@@ -113,7 +113,7 @@ pub fn export_encrypted(entries: &[VaultEntry], master_key: &MasterKey) -> Expor
         metadata,
         encrypted_data,
     };
-    bincode::serialize(&backup).map_err(|e| ExportError::Serialization(e.to_string()))
+    encode(&backup).map_err(|e| ExportError::Serialization(e.to_string()))
 }
 
 /// Export entries to JSON format (unencrypted)
