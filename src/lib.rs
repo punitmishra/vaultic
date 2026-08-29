@@ -59,6 +59,7 @@ pub mod mcp;
 pub mod migration;
 pub mod models;
 pub mod recovery;
+pub mod serialization;
 pub mod session;
 pub mod sharing;
 pub mod storage;

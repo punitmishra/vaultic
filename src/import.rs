@@ -12,6 +12,7 @@ use thiserror::Error;
 use crate::crypto::{Cipher, CryptoError, MasterKey};
 use crate::export::EncryptedBackup;
 use crate::models::{EntryType, SensitiveString, VaultEntry};
+use crate::serialization::decode;
 
 /// Import errors
 #[derive(Debug, Error)]
@@ -42,14 +43,14 @@ pub enum ImportFormat {
 
 /// Import entries from encrypted Vaultic backup
 pub fn import_encrypted(data: &[u8], master_key: &MasterKey) -> ImportResult<Vec<VaultEntry>> {
-    let backup: EncryptedBackup = bincode::deserialize(data)
-        .map_err(|e| ImportError::Parse(format!("Invalid backup format: {}", e)))?;
+    let backup: EncryptedBackup =
+        decode(data).map_err(|e| ImportError::Parse(format!("Invalid backup format: {}", e)))?;
 
     let derived = master_key.derive_keys();
     let cipher = Cipher::new(&derived.encryption_key);
     let decrypted = cipher.decrypt(&backup.encrypted_data)?;
 
-    bincode::deserialize(&decrypted)
+    decode(&decrypted)
         .map_err(|e| ImportError::Parse(format!("Failed to deserialize entries: {}", e)))
 }
 

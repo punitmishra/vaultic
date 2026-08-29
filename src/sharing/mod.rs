@@ -15,6 +15,7 @@ use crate::crypto::{
     SignatureVerifier,
 };
 use crate::models::{SharedSecret, UserIdentity, VaultEntry};
+use crate::serialization::{decode, encode};
 
 /// Sharing errors
 #[derive(Debug, Error)]
@@ -22,8 +23,11 @@ pub enum SharingError {
     #[error("Crypto error: {0}")]
     Crypto(#[from] CryptoError),
 
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    #[error("Encode error: {0}")]
+    Encode(#[from] crate::serialization::EncodeError),
+
+    #[error("Decode error: {0}")]
+    Decode(#[from] crate::serialization::DecodeError),
 
     #[error("Recipient not found: {0}")]
     RecipientNotFound(String),
@@ -118,7 +122,7 @@ impl SharingManager {
             sender_name: self.own_identity.name.clone(),
         };
 
-        let serialized = bincode::serialize(&share_data)?;
+        let serialized = encode(&share_data)?;
 
         // Encrypt with shared symmetric key
         let cipher = Cipher::new(&symmetric_key);
@@ -191,7 +195,7 @@ impl SharingManager {
         let decrypted = cipher.decrypt(&share.encrypted_data)?;
 
         // Deserialize
-        let data: ShareData = bincode::deserialize(&decrypted)?;
+        let data: ShareData = decode(&decrypted)?;
 
         Ok(data)
     }
