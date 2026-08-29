@@ -491,6 +491,19 @@ pub struct SharedSecret {
     pub sender_fingerprint: String,
     /// Recipient's fingerprint
     pub recipient_fingerprint: String,
+    /// Sender's Ed25519 verifying (public) key. Authenticates the share:
+    /// the recipient verifies `signature` against it, and recomputes
+    /// `sender_fingerprint` from it (plus `sender_exchange_key`).
+    #[serde(default)]
+    pub sender_signing_key: Vec<u8>,
+    /// Sender's X25519 exchange public key. Needed alongside
+    /// `sender_signing_key` to recompute and bind `sender_fingerprint`.
+    #[serde(default)]
+    pub sender_exchange_key: Vec<u8>,
+    /// Ed25519 signature by the sender over the transcript
+    /// `ephemeral_public ‖ recipient_fingerprint ‖ ciphertext`.
+    #[serde(default)]
+    pub signature: Vec<u8>,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     /// One-time share (deleted after first access)
