@@ -1322,15 +1322,13 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             rand::rngs::OsRng.fill_bytes(&mut salt);
             kdf_params.salt = salt.clone();
 
-            // Derive master key using Argon2
-            use argon2::Argon2;
-            let argon2 = Argon2::default();
-            let mut key_bytes = [0u8; 32];
-            argon2
-                .hash_password_into(password.as_bytes(), &salt, &mut key_bytes)
-                .map_err(|e| format!("Key derivation failed: {}", e))?;
-
-            let master_key = crate::crypto::MasterKey::from_bytes(key_bytes);
+            // Derive the master key honoring the stored KDF parameters so the
+            // recorded metadata is truthful and `--high-security` is real. This
+            // keeps the vault interoperable with the GUI/agent, which always
+            // derive from the stored parameters.
+            let master_key =
+                crate::crypto::KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
+                    .map_err(|e| format!("Key derivation failed: {}", e))?;
 
             crate::storage::VaultStorage::create(
                 &vault_path,
@@ -1376,22 +1374,29 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 None => Prompts::master_password(false)?,
             };
 
-            // Load KDF params from vault
-            let kdf_params = crate::storage::KdfParamsStorage::load(&vault_path)?;
-
-            // Derive master key
-            use argon2::Argon2;
-            let argon2 = Argon2::default();
-            let mut key_bytes = [0u8; 32];
-            argon2
-                .hash_password_into(password.as_bytes(), &kdf_params.salt, &mut key_bytes)
-                .map_err(|e| format!("Key derivation failed: {}", e))?;
-
-            let master_key = crate::crypto::MasterKey::from_bytes(key_bytes);
-
-            // Verify by attempting to unlock vault
+            // Derive and verify the master key. This honors the stored KDF
+            // parameters and transparently falls back to the pre-2.3 legacy
+            // derivation for older CLI vaults whose recorded parameters were
+            // never actually applied.
             let mut storage = crate::storage::VaultStorage::open(&vault_path)?;
-            storage.unlock(&master_key)?;
+            let (master_key, was_legacy) = storage.unlock_with_password_ext(password.as_bytes())?;
+
+            // Self-heal a legacy vault: rewrite its KDF metadata to record the
+            // true parameters so future unlocks are single-derivation and the
+            // GUI/agent (which honor the stored parameters) can open it too.
+            // Metadata-only — the vault key is unchanged, nothing is re-encrypted.
+            if was_legacy {
+                match storage.heal_legacy_kdf_params() {
+                    Ok(()) => Output::info(
+                        "Upgraded legacy KDF metadata to record its true parameters \
+                         (no re-encryption needed).",
+                    ),
+                    Err(e) => Output::warning(&format!(
+                        "Vault unlocked, but could not upgrade its KDF metadata: {}",
+                        e
+                    )),
+                }
+            }
 
             // Create session
             session_mgr.create(&vault_path, &master_key, timeout)?;
