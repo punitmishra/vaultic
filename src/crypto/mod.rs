@@ -361,19 +361,33 @@ impl IdentityKeyPair {
 
     /// Compute fingerprint (truncated hash of public keys)
     pub fn fingerprint(&self) -> String {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(self.signing_public_key().as_bytes());
-        hasher.update(self.exchange_public_key().as_bytes());
-        let hash = hasher.finalize();
-
-        // Format as groups of 4 hex chars
-        hash[..16]
-            .chunks(4)
-            .map(hex::encode)
-            .collect::<Vec<_>>()
-            .join(":")
+        fingerprint_from_public_keys(
+            self.signing_public_key().as_bytes(),
+            self.exchange_public_key().as_bytes(),
+        )
     }
+}
+
+/// Compute an identity fingerprint from raw public key bytes.
+///
+/// Single source of truth for the fingerprint format so that code which only
+/// has the transported public keys (e.g. verifying a share's authenticity) can
+/// recompute the exact same value as [`IdentityKeyPair::fingerprint`]:
+/// `SHA256(signing_pubkey ‖ exchange_pubkey)`, first 16 bytes, formatted as
+/// ":"-joined groups of 4 hex chars.
+pub fn fingerprint_from_public_keys(signing_key: &[u8], exchange_key: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(signing_key);
+    hasher.update(exchange_key);
+    let hash = hasher.finalize();
+
+    // Format as groups of 4 hex chars
+    hash[..16]
+        .chunks(4)
+        .map(hex::encode)
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 /// Key exchange for sharing secrets
@@ -699,5 +713,18 @@ mod tests {
         let bob_key = KeyExchange::recover_shared_secret(&bob, &ephemeral).unwrap();
 
         assert_eq!(alice_key, bob_key);
+    }
+
+    #[test]
+    fn test_fingerprint_from_public_keys_matches_keypair() {
+        // The free function must reproduce IdentityKeyPair::fingerprint exactly
+        // — this is what lets share verification recompute a sender's
+        // fingerprint from only the transported public keys.
+        let kp = IdentityKeyPair::generate();
+        let recomputed = fingerprint_from_public_keys(
+            kp.signing_public_key().as_bytes(),
+            kp.exchange_public_key().as_bytes(),
+        );
+        assert_eq!(recomputed, kp.fingerprint());
     }
 }
