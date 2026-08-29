@@ -69,7 +69,7 @@ impl Theme {
             bg_elevated: Color32::from_rgb(0x24, 0x26, 0x2B),
             fg: Color32::from_rgb(0xE6, 0xE6, 0xEB),
             fg_muted: Color32::from_rgb(0x8A, 0x8E, 0x99),
-            stroke: Stroke::new(1.0, Color32::from_rgb(0x35, 0x38, 0x40)),
+            stroke: Stroke::new(1.0_f32, Color32::from_rgb(0x35, 0x38, 0x40)),
             accent: Color32::from_rgb(0x6E, 0xA8, 0xFE),
             success: Color32::from_rgb(0x55, 0xC4, 0x88),
             warning: Color32::from_rgb(0xE6, 0xB0, 0x55),
@@ -86,7 +86,7 @@ impl Theme {
             bg_elevated: Color32::from_rgb(0x33, 0x36, 0x44),
             fg: Color32::from_rgb(0xF8, 0xF8, 0xF2),
             fg_muted: Color32::from_rgb(0x62, 0x72, 0xA4),
-            stroke: Stroke::new(1.0, Color32::from_rgb(0x44, 0x47, 0x5A)),
+            stroke: Stroke::new(1.0_f32, Color32::from_rgb(0x44, 0x47, 0x5A)),
             accent: Color32::from_rgb(0xBD, 0x93, 0xF9),
             success: Color32::from_rgb(0x50, 0xFA, 0x7B),
             warning: Color32::from_rgb(0xF1, 0xFA, 0x8C),
@@ -103,7 +103,7 @@ impl Theme {
             bg_elevated: Color32::from_rgb(0x07, 0x36, 0x42),
             fg: Color32::from_rgb(0x93, 0xA1, 0xA1),
             fg_muted: Color32::from_rgb(0x58, 0x6E, 0x75),
-            stroke: Stroke::new(1.0, Color32::from_rgb(0x07, 0x36, 0x42)),
+            stroke: Stroke::new(1.0_f32, Color32::from_rgb(0x07, 0x36, 0x42)),
             accent: Color32::from_rgb(0x26, 0x8B, 0xD2),
             success: Color32::from_rgb(0x85, 0x99, 0x00),
             warning: Color32::from_rgb(0xB5, 0x89, 0x00),
@@ -120,7 +120,7 @@ impl Theme {
             bg_elevated: Color32::from_rgb(0x1C, 0x1C, 0x1C),
             fg: Color32::from_rgb(0xE0, 0xE0, 0xE0),
             fg_muted: Color32::from_rgb(0x80, 0x80, 0x80),
-            stroke: Stroke::new(1.0, Color32::from_rgb(0x40, 0x40, 0x40)),
+            stroke: Stroke::new(1.0_f32, Color32::from_rgb(0x40, 0x40, 0x40)),
             // Same monotone for accent/success/warning/error: differences
             // come from icons, weight, and position rather than hue.
             accent: Color32::from_rgb(0xFF, 0xFF, 0xFF),
@@ -161,11 +161,11 @@ impl Theme {
         visuals.override_text_color = Some(self.fg);
         visuals.hyperlink_color = self.accent;
         visuals.selection.bg_fill = self.selection;
-        visuals.selection.stroke = Stroke::new(1.0, self.accent);
+        visuals.selection.stroke = Stroke::new(1.0_f32, self.accent);
         visuals.widgets.noninteractive.bg_stroke = self.stroke;
         visuals.widgets.inactive.bg_stroke = self.stroke;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, self.accent);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0, self.accent);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, self.accent);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, self.accent);
     }
 }
 
