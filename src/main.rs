@@ -26,6 +26,7 @@ mod import;
 mod migration;
 mod models;
 mod recovery;
+mod serialization;
 mod session;
 mod sharing;
 mod storage;
