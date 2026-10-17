@@ -53,7 +53,7 @@ pub mod keyring;
 
 use std::path::{Path, PathBuf};
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::{Db, Tree};
 use thiserror::Error;
 use uuid::Uuid;
@@ -96,9 +96,24 @@ mod trees {
     pub const ENTRIES: &str = "entries";
     pub const IDENTITIES: &str = "identities";
     pub const SHARED_SECRETS: &str = "shared_secrets";
+    /// Sender-authentication material for shares, keyed by share id. Kept out
+    /// of `SHARED_SECRETS` so that record stays byte-identical to the
+    /// pre-authentication on-disk layout (see `SharedSecret`'s skipped fields).
+    pub const SHARE_AUTH: &str = "share_auth";
     pub const AUDIT_LOG: &str = "audit_log";
     pub const CONFIG: &str = "config";
     pub const OWN_KEYPAIR: &str = "own_keypair";
+}
+
+/// Sender-authentication material for a share, persisted in the `SHARE_AUTH`
+/// tree keyed by the share id — separate from the `SharedSecret` record so the
+/// latter keeps its pre-authentication byte layout. See `SharedSecret`'s
+/// `#[serde(skip)]` fields.
+#[derive(Serialize, Deserialize)]
+struct ShareAuth {
+    sender_signing_key: Vec<u8>,
+    sender_exchange_key: Vec<u8>,
+    signature: Vec<u8>,
 }
 
 /// Encrypted vault storage
@@ -547,8 +562,28 @@ impl VaultStorage {
 
     /// Store a shared secret
     pub fn add_shared_secret(&self, secret: &SharedSecret) -> StorageResult<()> {
+        // The `SharedSecret` record itself stays byte-identical to the
+        // pre-authentication layout (its auth fields are `#[serde(skip)]`).
         let tree = self.get_tree(trees::SHARED_SECRETS)?;
-        self.store_encrypted(&tree, secret.id.as_bytes(), secret)
+        self.store_encrypted(&tree, secret.id.as_bytes(), secret)?;
+
+        // Persist the sender-authentication material separately, keyed by the
+        // same share id, when present. Older callers that produce no auth
+        // material simply write no auth record.
+        if !secret.signature.is_empty()
+            || !secret.sender_signing_key.is_empty()
+            || !secret.sender_exchange_key.is_empty()
+        {
+            let auth_tree = self.get_tree(trees::SHARE_AUTH)?;
+            let auth = ShareAuth {
+                sender_signing_key: secret.sender_signing_key.clone(),
+                sender_exchange_key: secret.sender_exchange_key.clone(),
+                signature: secret.signature.clone(),
+            };
+            self.store_encrypted(&auth_tree, secret.id.as_bytes(), &auth)?;
+        }
+
+        Ok(())
     }
 
     /// Get shared secrets for an entry
@@ -557,14 +592,25 @@ impl VaultStorage {
         entry_id: &Uuid,
     ) -> StorageResult<Vec<SharedSecret>> {
         let tree = self.get_tree(trees::SHARED_SECRETS)?;
+        let auth_tree = self.get_tree(trees::SHARE_AUTH)?;
         let cipher = self.get_cipher()?;
         let mut secrets = Vec::new();
 
         for result in tree.iter() {
-            let (_, encrypted) = result?;
+            let (key, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let secret: SharedSecret = bincode::deserialize(&decrypted)?;
+            let mut secret: SharedSecret = bincode::deserialize(&decrypted)?;
             if secret.entry_id == *entry_id {
+                // Re-join the sender-authentication material, if any. A share
+                // written before authentication existed has no auth record and
+                // keeps its empty auth fields.
+                if let Some(encrypted_auth) = auth_tree.get(&key)? {
+                    let decrypted_auth = cipher.decrypt(&encrypted_auth)?;
+                    let auth: ShareAuth = bincode::deserialize(&decrypted_auth)?;
+                    secret.sender_signing_key = auth.sender_signing_key;
+                    secret.sender_exchange_key = auth.sender_exchange_key;
+                    secret.signature = auth.signature;
+                }
                 secrets.push(secret);
             }
         }
@@ -877,6 +923,25 @@ mod tests {
         }
     }
 
+    fn sample_shared_secret(entry_id: Uuid, with_auth: bool) -> SharedSecret {
+        SharedSecret {
+            id: Uuid::new_v4(),
+            entry_id,
+            encrypted_data: vec![1, 2, 3, 4],
+            encrypted_key: vec![5, 6, 7, 8],
+            sender_fingerprint: "sender-fp".to_string(),
+            recipient_fingerprint: "recipient-fp".to_string(),
+            sender_signing_key: if with_auth { vec![0xAA; 32] } else { vec![] },
+            sender_exchange_key: if with_auth { vec![0xBB; 32] } else { vec![] },
+            signature: if with_auth { vec![0xCC; 64] } else { vec![] },
+            created_at: chrono::Utc::now(),
+            expires_at: None,
+            one_time: false,
+            access_count: 0,
+            max_access_count: None,
+        }
+    }
+
     #[test]
     fn test_unlock_with_password_honest_vault() {
         // A vault created honoring its recorded parameters (as the CLI now
@@ -1008,5 +1073,54 @@ mod tests {
             !vault_path.join("kdf_params.json.tmp").exists(),
             "atomic save must not leave a .tmp file behind"
         );
+    }
+
+    #[test]
+    fn test_shared_secret_auth_roundtrips_via_separate_tree() {
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("test_vault");
+        let master_key = MasterKey::generate();
+        let kdf_params = crate::crypto::KeyDeriver::generate_params();
+        let storage =
+            VaultStorage::create(&vault_path, "T", &master_key, kdf_params, "fp".to_string())
+                .unwrap();
+
+        let entry_id = Uuid::new_v4();
+        let secret = sample_shared_secret(entry_id, true);
+        storage.add_shared_secret(&secret).unwrap();
+
+        let loaded = storage.get_shared_secrets_for_entry(&entry_id).unwrap();
+        assert_eq!(loaded.len(), 1);
+        // The record proper round-trips…
+        assert_eq!(loaded[0].id, secret.id);
+        assert_eq!(loaded[0].encrypted_data, secret.encrypted_data);
+        // …and the auth material is re-joined from the separate SHARE_AUTH tree.
+        assert_eq!(loaded[0].sender_signing_key, vec![0xAA; 32]);
+        assert_eq!(loaded[0].sender_exchange_key, vec![0xBB; 32]);
+        assert_eq!(loaded[0].signature, vec![0xCC; 64]);
+    }
+
+    #[test]
+    fn test_shared_secret_without_auth_still_lists() {
+        // A share with no auth material writes no SHARE_AUTH record — exactly
+        // the shape a pre-authentication (old) on-disk record has. It must
+        // still decode and list, with empty auth fields (no brick).
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("test_vault");
+        let master_key = MasterKey::generate();
+        let kdf_params = crate::crypto::KeyDeriver::generate_params();
+        let storage =
+            VaultStorage::create(&vault_path, "T", &master_key, kdf_params, "fp".to_string())
+                .unwrap();
+
+        let entry_id = Uuid::new_v4();
+        let secret = sample_shared_secret(entry_id, false);
+        storage.add_shared_secret(&secret).unwrap();
+
+        let loaded = storage.get_shared_secrets_for_entry(&entry_id).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, secret.id);
+        assert!(loaded[0].sender_signing_key.is_empty());
+        assert!(loaded[0].signature.is_empty());
     }
 }

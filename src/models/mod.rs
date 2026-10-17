@@ -491,18 +491,30 @@ pub struct SharedSecret {
     pub sender_fingerprint: String,
     /// Recipient's fingerprint
     pub recipient_fingerprint: String,
+    // --- Sender authentication material ---
+    //
+    // These three fields are `#[serde(skip)]` so they are NOT part of the
+    // bincode encoding of `SharedSecret`. The `SHARED_SECRETS` on-disk record
+    // therefore stays byte-identical to the pre-authentication layout, and
+    // shares written by older versions still decode. The authentication
+    // material is persisted separately, keyed by share `id`, in the storage
+    // layer's dedicated auth store and re-joined onto the struct on read (an
+    // older share simply has no auth record and these stay empty). They remain
+    // ordinary in-memory fields, so `create_share` / `open_share` carry and
+    // verify them exactly as before.
+    //
     /// Sender's Ed25519 verifying (public) key. Authenticates the share:
     /// the recipient verifies `signature` against it, and recomputes
     /// `sender_fingerprint` from it (plus `sender_exchange_key`).
-    #[serde(default)]
+    #[serde(skip)]
     pub sender_signing_key: Vec<u8>,
     /// Sender's X25519 exchange public key. Needed alongside
     /// `sender_signing_key` to recompute and bind `sender_fingerprint`.
-    #[serde(default)]
+    #[serde(skip)]
     pub sender_exchange_key: Vec<u8>,
     /// Ed25519 signature by the sender over the transcript
     /// `ephemeral_public ‖ recipient_fingerprint ‖ ciphertext`.
-    #[serde(default)]
+    #[serde(skip)]
     pub signature: Vec<u8>,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
