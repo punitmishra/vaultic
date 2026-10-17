@@ -62,6 +62,7 @@ use crate::crypto::{Cipher, CryptoError, IdentityKeyPair, KeyDeriver, MasterKey}
 use crate::models::{
     AuditLogEntry, KdfParams, SearchFilter, SharedSecret, UserIdentity, VaultEntry, VaultMetadata,
 };
+use crate::serialization::{decode, encode};
 
 /// Storage errors
 #[derive(Debug, Error)]
@@ -69,8 +70,14 @@ pub enum StorageError {
     #[error("Database error: {0}")]
     Database(#[from] sled::Error),
 
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] bincode::Error),
+    #[error("Encode error: {0}")]
+    Encode(#[from] crate::serialization::EncodeError),
+
+    #[error("Decode error: {0}")]
+    Decode(#[from] crate::serialization::DecodeError),
+
+    #[error("JSON error: {0}")]
+    Json(String),
 
     #[error("Crypto error: {0}")]
     Crypto(#[from] CryptoError),
@@ -277,7 +284,7 @@ impl VaultStorage {
         value: &T,
     ) -> StorageResult<()> {
         let cipher = self.get_cipher()?;
-        let serialized = bincode::serialize(value)?;
+        let serialized = encode(value)?;
         let encrypted = cipher.encrypt(&serialized)?;
         tree.insert(key, encrypted)?;
         Ok(())
@@ -293,7 +300,7 @@ impl VaultStorage {
 
         if let Some(encrypted) = tree.get(key)? {
             let decrypted = cipher.decrypt(&encrypted)?;
-            let value = bincode::deserialize(&decrypted)?;
+            let value = decode(&decrypted)?;
             Ok(Some(value))
         } else {
             Ok(None)
@@ -306,7 +313,7 @@ impl VaultStorage {
 
         if let Some(encrypted) = tree.get(b"vault_metadata")? {
             let decrypted = cipher.decrypt(&encrypted)?;
-            let metadata = bincode::deserialize(&decrypted)?;
+            let metadata = decode(&decrypted)?;
             Ok(metadata)
         } else {
             Err(StorageError::InvalidData)
@@ -400,7 +407,7 @@ impl VaultStorage {
         for result in tree.iter() {
             let (_, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let entry: VaultEntry = bincode::deserialize(&decrypted)?;
+            let entry: VaultEntry = decode(&decrypted)?;
             entries.push(entry);
         }
 
@@ -533,7 +540,7 @@ impl VaultStorage {
         for result in tree.iter() {
             let (_, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let identity: UserIdentity = bincode::deserialize(&decrypted)?;
+            let identity: UserIdentity = decode(&decrypted)?;
             if identity.fingerprint == fingerprint {
                 return Ok(Some(identity));
             }
@@ -551,7 +558,7 @@ impl VaultStorage {
         for result in tree.iter() {
             let (_, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let identity: UserIdentity = bincode::deserialize(&decrypted)?;
+            let identity: UserIdentity = decode(&decrypted)?;
             identities.push(identity);
         }
 
@@ -599,14 +606,14 @@ impl VaultStorage {
         for result in tree.iter() {
             let (key, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let mut secret: SharedSecret = bincode::deserialize(&decrypted)?;
+            let mut secret: SharedSecret = decode(&decrypted)?;
             if secret.entry_id == *entry_id {
                 // Re-join the sender-authentication material, if any. A share
                 // written before authentication existed has no auth record and
                 // keeps its empty auth fields.
                 if let Some(encrypted_auth) = auth_tree.get(&key)? {
                     let decrypted_auth = cipher.decrypt(&encrypted_auth)?;
-                    let auth: ShareAuth = bincode::deserialize(&decrypted_auth)?;
+                    let auth: ShareAuth = decode(&decrypted_auth)?;
                     secret.sender_signing_key = auth.sender_signing_key;
                     secret.sender_exchange_key = auth.sender_exchange_key;
                     secret.signature = auth.signature;
@@ -682,7 +689,7 @@ impl VaultStorage {
         for result in tree.iter() {
             let (_, encrypted) = result?;
             let decrypted = cipher.decrypt(&encrypted)?;
-            let log: AuditLogEntry = bincode::deserialize(&decrypted)?;
+            let log: AuditLogEntry = decode(&decrypted)?;
             logs.push(log);
         }
 
@@ -732,7 +739,7 @@ impl VaultStorage {
         };
 
         let cipher = self.get_cipher()?;
-        let serialized = bincode::serialize(&backup)?;
+        let serialized = encode(&backup)?;
         let encrypted = cipher.encrypt(&serialized)?;
 
         Ok(encrypted)
@@ -742,7 +749,7 @@ impl VaultStorage {
     pub fn import_backup(&mut self, encrypted: &[u8]) -> StorageResult<usize> {
         let cipher = self.get_cipher()?;
         let decrypted = cipher.decrypt(encrypted)?;
-        let backup: VaultBackup = bincode::deserialize(&decrypted)?;
+        let backup: VaultBackup = decode(&decrypted)?;
 
         let count = backup.entries.len();
 
@@ -775,11 +782,8 @@ impl KdfParamsStorage {
 
     pub fn save(path: &Path, params: &KdfParams) -> StorageResult<()> {
         let file_path = path.join(Self::FILENAME);
-        let json = serde_json::to_string_pretty(params).map_err(|e| {
-            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
-                e.to_string(),
-            )))
-        })?;
+        let json =
+            serde_json::to_string_pretty(params).map_err(|e| StorageError::Json(e.to_string()))?;
 
         // Crash-atomic write. `kdf_params.json` holds the ONLY copy of the
         // Argon2 salt; without the salt the master key can never be re-derived
@@ -808,11 +812,8 @@ impl KdfParamsStorage {
         let file_path = path.join(Self::FILENAME);
         let json = std::fs::read_to_string(file_path)
             .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
-        let params: KdfParams = serde_json::from_str(&json).map_err(|e| {
-            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
-                e.to_string(),
-            )))
-        })?;
+        let params: KdfParams =
+            serde_json::from_str(&json).map_err(|e| StorageError::Json(e.to_string()))?;
         Ok(params)
     }
 

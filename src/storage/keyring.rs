@@ -41,11 +41,8 @@ impl KeyringStorage {
     /// The keyring itself is not encrypted (the vault keys inside are),
     /// but we use pretty JSON for easier debugging and version control.
     pub fn save(&self, keyring: &VaultKeyring) -> Result<(), StorageError> {
-        let json = serde_json::to_string_pretty(keyring).map_err(|e| {
-            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
-                e.to_string(),
-            )))
-        })?;
+        let json =
+            serde_json::to_string_pretty(keyring).map_err(|e| StorageError::Json(e.to_string()))?;
 
         // Create parent directories if they don't exist
         if let Some(parent) = self.path.parent() {
@@ -66,11 +63,8 @@ impl KeyringStorage {
         let json = fs::read_to_string(&self.path)
             .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
 
-        let keyring: VaultKeyring = serde_json::from_str(&json).map_err(|e| {
-            StorageError::Serialization(bincode::Error::from(bincode::ErrorKind::Custom(
-                e.to_string(),
-            )))
-        })?;
+        let keyring: VaultKeyring =
+            serde_json::from_str(&json).map_err(|e| StorageError::Json(e.to_string()))?;
 
         Ok(keyring)
     }
