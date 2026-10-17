@@ -734,7 +734,27 @@ impl KdfParamsStorage {
                 e.to_string(),
             )))
         })?;
-        std::fs::write(file_path, json).map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+
+        // Crash-atomic write. `kdf_params.json` holds the ONLY copy of the
+        // Argon2 salt; without the salt the master key can never be re-derived
+        // and the vault is permanently unopenable. A plain `fs::write` opens
+        // with O_TRUNC, so a crash/power-loss between truncate and flush would
+        // leave the file empty or partial. The auto-heal on the first unlock of
+        // every legacy vault rewrites this file in place, so we must never risk
+        // a torn write: stage into a sibling temp file, fsync its contents, then
+        // atomically rename over the target (same filesystem).
+        let tmp_path = file_path.with_extension("json.tmp");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp_path)
+                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+            f.write_all(json.as_bytes())
+                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+            f.sync_all()
+                .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
+        }
+        std::fs::rename(&tmp_path, &file_path)
+            .map_err(|e| StorageError::Database(sled::Error::Io(e)))?;
         Ok(())
     }
 
@@ -956,5 +976,37 @@ mod tests {
 
         let mut storage = VaultStorage::open(&vault_path).unwrap();
         assert!(storage.unlock_with_password_ext(b"wrong-password").is_err());
+    }
+
+    #[test]
+    fn test_kdf_params_save_is_atomic_and_overwrites() {
+        // The auto-heal rewrites kdf_params.json in place on the first legacy
+        // unlock. The rewrite must replace the file cleanly and leave no .tmp
+        // litter, so the salt is never lost to a half-written file.
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path();
+
+        let first = cheap_params(b"atomic-salt-0001");
+        KdfParamsStorage::save(vault_path, &first).unwrap();
+        assert_eq!(KdfParamsStorage::load(vault_path).unwrap().salt, first.salt);
+
+        // Overwrite in place with different params (the heal scenario).
+        let second = KdfParams {
+            memory_cost: 19456,
+            time_cost: 2,
+            ..cheap_params(b"atomic-salt-0002")
+        };
+        KdfParamsStorage::save(vault_path, &second).unwrap();
+
+        let loaded = KdfParamsStorage::load(vault_path).unwrap();
+        assert_eq!(loaded.salt, second.salt);
+        assert_eq!(loaded.memory_cost, 19456);
+        assert_eq!(loaded.time_cost, 2);
+
+        // A successful save must not leave the staging file behind.
+        assert!(
+            !vault_path.join("kdf_params.json.tmp").exists(),
+            "atomic save must not leave a .tmp file behind"
+        );
     }
 }
