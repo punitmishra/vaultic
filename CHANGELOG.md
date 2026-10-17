@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — audit remediation sweep
+
+A full sweep of a read-only security audit's confirmed findings. Each
+landed on its own branch/PR; none changes the on-disk format in a way
+that requires a vault migration.
+
+- **Authenticated sharing** ([#61](https://github.com/punitmishra/vaultic/pull/61)) —
+  shares are now signed with the sender's Ed25519 identity key over a
+  domain-separated transcript binding the ephemeral DH key, recipient
+  fingerprint, and ciphertext; `open_share` verifies the signature and
+  binds the carried keys to the sender fingerprint (TOFU) before
+  decrypting. The sender keys/signature are stored in a separate
+  `share_auth` tree, so the `SharedSecret` record stays byte-identical
+  to the previous layout and existing shares still decode.
+- **KDF parameters are honored** ([#59](https://github.com/punitmishra/vaultic/pull/59)) —
+  the CLI now derives the master key over the vault's recorded Argon2
+  parameters (so `--high-security` is real and CLI/GUI/agent vaults
+  interoperate). Pre-existing vaults, whose recorded parameters were
+  never actually applied, still unlock via a legacy fallback that
+  then self-heals the recorded parameters; the self-heal rewrite of
+  `kdf_params.json` is crash-atomic (temp file + fsync + rename) so a
+  torn write cannot lose the salt.
+- **Constant-time TOTP, unbiased generation, clipboard clear**
+  ([#58](https://github.com/punitmishra/vaultic/pull/58)) — TOTP
+  verification uses a constant-time comparison; the password/passphrase
+  generator uses rejection sampling (no modulo bias) and the full EFF
+  large wordlist (7776 words); copying a password to the clipboard now
+  clears it after 30 seconds instead of leaving it indefinitely.
+- **Secret-lifecycle hardening** ([#60](https://github.com/punitmishra/vaultic/pull/60)) —
+  session plaintext buffers and in-memory master keys are zeroized on
+  drop across the CLI, TUI, and agent; the TUI clipboard clear is
+  inlined so it never writes to stdout.
+- **Dependency audit is now gating** ([#4](https://github.com/punitmishra/vaultic/issues/4)) —
+  `rustls` bumped to 0.23.46 (clears four reachable TLS advisories);
+  the remaining advisories (`rmcp` Streamable-HTTP, `quinn-proto` ×5)
+  are verified unreachable in the compiled binaries and waived with
+  rationale in `.cargo/audit.toml`; `audit.yml` no longer runs with
+  `continue-on-error`, so it fails on any unwaived advisory.
+
+### Internal
+
+- **bincode 1.x → 2.0** ([#62](https://github.com/punitmishra/vaultic/pull/62)) —
+  migrated off the unmaintained bincode 1.3 to 2.0 via a centralized
+  `serialization` module hard-coding `bincode::config::legacy()`.
+  Output is byte-identical to 1.x (proven by golden-vector tests), so
+  no vault, backup, or share blob needs migrating.
+
 ### Added — MCP server (`vaultic-mcp`) ([#43](https://github.com/punitmishra/vaultic/pull/43))
 
 A fourth binary: an [MCP](https://modelcontextprotocol.io/) server that

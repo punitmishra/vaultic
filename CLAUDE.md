@@ -25,14 +25,14 @@ This document provides context for Claude to continue developing Vaultic.
 
 **Build Status**: COMPILING AND RUNNING (four binaries; `vaultic-mcp` unreleased → v2.3.0)
 **Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app), `vaultic-mcp` (MCP server)
-**Tests**: 450 passing (lib + bin + integration + doc)
+**Tests**: 522 passing (240 lib + 218 bin + 59 integration + 5 doc) on `main`
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED + 4 themes (default/dracula/solarized-dark/monochrome)
 **GUI**: FULLY IMPLEMENTED — unlock + list + detail + live TOTP + 4 themes + keyboard nav
-**Daemon**: FULLY IMPLEMENTED — Unix socket, peer-cred auth, 9 protocol methods, inactivity lock
+**Daemon**: FULLY IMPLEMENTED — Unix socket, peer-cred auth, 9 protocol methods, inactivity lock, mlock'd master key (#51)
 **MCP**: FULLY IMPLEMENTED — Model Context Protocol server for AI tool integration
 **Benchmarks**: `cargo bench --bench vault_ops` covers list/search/get/add/unlock against 10k entries
-**Audit**: `cargo audit` is currently RED — 6 vulnerabilities + 11 warnings across ~702 deps (RUSTSEC-2025-0136/sequoia was cleared by the 2.3 bump #42). Open vulns: crossbeam-epoch, quick-xml ×2, quinn-proto, rmcp (DNS rebinding in the *Streamable HTTP* transport — `vaultic-mcp` uses stdio, likely unreachable), webbrowser. The `deps/rustsec-dep-bumps` branch clears 4 (crossbeam-epoch/quinn-proto/webbrowser + anyhow unsound); quick-xml ×2 + rmcp remain. `.github/workflows/audit.yml` runs but is `continue-on-error: true` (non-gating).
+**Audit**: `cargo audit` is **green and gating**. `rustls` was bumped to 0.23.46, clearing the four reachable TLS advisories (RUSTSEC-2026-0285/0346/0348/0349, reached via `reqwest` for HIBP/Ollama). The six remaining advisories are waived in `.cargo/audit.toml`, each individually verified unreachable in the compiled binaries: `rmcp` DNS-rebinding (RUSTSEC-2026-0189 — `vaultic-mcp` is stdio-only and never constructs the Streamable-HTTP transport) and `quinn-proto` ×5 (RUSTSEC-2026-0338/0339/0340/0341/0342 — pulled into the lockfile only through `reqwest`'s disabled HTTP/3 feature, not compiled; `cargo tree -i quinn-proto` is empty). `.github/workflows/audit.yml` now **fails on any unwaived advisory** (`continue-on-error` removed). Remaining `cargo audit` output is non-failing warnings only (unmaintained/unsound/yanked transitive crates, e.g. `aes` yanked via `ctap-hid-fido2`).
 **CI/CD**: GitHub Actions configured; currently billing-locked (issue #8)
 **Documentation**: CHANGELOG.md, slim ROADMAP.md, AGENT_PROTOCOL.md, MCP_SERVER.md, comprehensive CLAUDE.md
 **GitHub**: https://github.com/punitmishra/vaultic
@@ -41,7 +41,7 @@ This document provides context for Claude to continue developing Vaultic.
 ```bash
 # Verify everything works
 cargo build --release        # Builds four binaries
-cargo test --release         # 450 passing
+cargo test --release         # 522 passing
 
 # CLI
 ./target/release/vaultic --help
@@ -133,7 +133,7 @@ cargo test --release         # 450 passing
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
 | `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
 | `mcp` | NEW | ~500 | Model Context Protocol server for AI tool integration |
-| `tests` | COMPLETE | ~900 | 450 tests (unit, integration, doctests) |
+| `tests` | COMPLETE | ~900 | 522 tests (unit, integration, doctests) |
 
 ---
 
@@ -260,9 +260,9 @@ vaultic tui --theme dracula
 ## Test Results (Latest)
 
 ```
-cargo test: 450 tests passing
-  - 204 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
-  - 182 bin tests (CLI parsing, commands)
+cargo test: 522 tests passing
+  - 240 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
+  - 218 bin tests (CLI parsing, commands)
   - 59 integration tests (44 end-to-end + 15 agent protocol)
   - 5 doctests (code examples in documentation)
 
@@ -431,7 +431,7 @@ cargo build                 # Debug build
 cargo build --release       # Release build
 
 # Test
-cargo test                  # All tests (450 passing)
+cargo test                  # All tests (522 passing)
 cargo test tui              # TUI tests only
 cargo test storage          # Storage tests only
 
@@ -475,7 +475,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **450 tests passing** - Keep them green (204 lib + 182 bin + 59 integration + 5 doc)
+2. **522 tests passing** - Keep them green (240 lib + 218 bin + 59 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it

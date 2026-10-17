@@ -1,0 +1,34 @@
+# cargo-audit configuration
+#
+# This file waives specific RUSTSEC advisories that have been individually
+# verified as NOT applicable to Vaultic as built. Every entry is justified
+# below; an advisory is only listed here if it is genuinely unreachable in our
+# compiled binaries, never merely to silence noise. Advisories with an
+# available fix are upgraded (see Cargo.lock), not waived.
+#
+# Re-verify this list whenever dependencies change: `cargo audit` without the
+# ignores (`cargo audit --ignore-config` or by commenting these out) shows the
+# full set, and `cargo tree -i <crate>` shows whether a crate is actually
+# compiled in.
+
+[advisories]
+ignore = [
+    # rmcp — DNS-rebinding in the *Streamable HTTP* server transport.
+    # vaultic-mcp speaks MCP over stdio only: src/bin/vaultic_mcp.rs builds its
+    # server with `rmcp::transport::io::stdio()` and never constructs the
+    # Streamable-HTTP transport the advisory concerns. No HTTP listener exists,
+    # so the rebinding vector is unreachable. No upstream fix is available.
+    "RUSTSEC-2026-0189",
+
+    # quinn-proto ×5 — QUIC panics / memory-exhaustion in the QUIC transport.
+    # quinn-proto is pulled into Cargo.lock only through reqwest's OPTIONAL
+    # HTTP/3 feature, which Vaultic does not enable. It is not compiled into any
+    # binary: `cargo tree -i quinn-proto` reports "nothing to print". Vaultic's
+    # only network use is outbound HTTPS (HIBP, Ollama) over the default
+    # TCP/TLS stack. No code path reaches QUIC. No upstream fix is available.
+    "RUSTSEC-2026-0338",
+    "RUSTSEC-2026-0339",
+    "RUSTSEC-2026-0340",
+    "RUSTSEC-2026-0341",
+    "RUSTSEC-2026-0342",
+]
