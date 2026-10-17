@@ -13,7 +13,7 @@ use flate2::write::DeflateEncoder;
 use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::{Cipher, MasterKey};
 
@@ -52,6 +52,15 @@ struct SessionData {
     expires_at: DateTime<Utc>,
     /// When session was created
     created_at: DateTime<Utc>,
+}
+
+impl Drop for SessionData {
+    fn drop(&mut self) {
+        // Wipe the in-memory master key when this struct goes away. Can't
+        // derive `ZeroizeOnDrop` because the struct also holds `PathBuf` /
+        // `DateTime`, which aren't `Zeroize`.
+        self.master_key.zeroize();
+    }
 }
 
 /// Lightweight session manager
@@ -96,12 +105,13 @@ impl SessionManager {
             created_at: now,
         };
 
-        // Serialize
-        let json =
-            serde_json::to_vec(&session).map_err(|e| SessionError::Serialization(e.to_string()))?;
+        // Serialize (holds the master key in plaintext — zeroize on drop).
+        let json = Zeroizing::new(
+            serde_json::to_vec(&session).map_err(|e| SessionError::Serialization(e.to_string()))?,
+        );
 
-        // Compress
-        let compressed = compress(&json)?;
+        // Compress (still plaintext — decompresses back to the key).
+        let compressed = Zeroizing::new(compress(&json)?);
 
         // Encrypt
         let cipher = Cipher::new(&self.machine_key);
@@ -118,14 +128,16 @@ impl SessionManager {
         // Read file
         let encrypted = fs::read(&self.session_path).map_err(|_| SessionError::NotFound)?;
 
-        // Decrypt
+        // Decrypt (yields the compressed plaintext — zeroize on drop).
         let cipher = Cipher::new(&self.machine_key);
-        let compressed = cipher
-            .decrypt(&encrypted)
-            .map_err(|_| SessionError::Corrupted)?;
+        let compressed = Zeroizing::new(
+            cipher
+                .decrypt(&encrypted)
+                .map_err(|_| SessionError::Corrupted)?,
+        );
 
-        // Decompress
-        let json = decompress(&compressed)?;
+        // Decompress (plaintext containing the key — zeroize on drop).
+        let json = Zeroizing::new(decompress(&compressed)?);
 
         // Deserialize
         let session: SessionData =
@@ -138,8 +150,10 @@ impl SessionManager {
             return Err(SessionError::Expired);
         }
 
+        // Clone the path out; `session` owns a Drop impl, so we can't move a
+        // field out of it. `master_key` is `Copy`, so reading it is fine.
         Ok((
-            session.vault_path,
+            session.vault_path.clone(),
             MasterKey::from_bytes(session.master_key),
         ))
     }
@@ -171,16 +185,17 @@ impl SessionManager {
     pub fn info(&self) -> Option<SessionInfo> {
         let encrypted = fs::read(&self.session_path).ok()?;
         let cipher = Cipher::new(&self.machine_key);
-        let compressed = cipher.decrypt(&encrypted).ok()?;
-        let json = decompress(&compressed).ok()?;
+        let compressed = Zeroizing::new(cipher.decrypt(&encrypted).ok()?);
+        let json = Zeroizing::new(decompress(&compressed).ok()?);
         let session: SessionData = serde_json::from_slice(&json).ok()?;
 
         if Utc::now() > session.expires_at {
             return None;
         }
 
+        // Clone rather than move — `SessionData` implements `Drop`.
         Some(SessionInfo {
-            vault_path: session.vault_path,
+            vault_path: session.vault_path.clone(),
             expires_at: session.expires_at,
             created_at: session.created_at,
         })
@@ -334,6 +349,21 @@ mod tests {
         // Destroy session
         mgr.destroy().unwrap();
         assert!(!mgr.is_active());
+    }
+
+    #[test]
+    fn test_session_data_drop_zeroizes() {
+        // Constructing and dropping SessionData must run our manual Drop
+        // (which zeroizes the master key) without panicking. Post-drop memory
+        // can't be observed safely, so the contract is simply that drop
+        // completes and the struct stays constructible.
+        let session = SessionData {
+            vault_path: PathBuf::from("/tmp/vaultic-drop-test"),
+            master_key: [0xCD; 32],
+            expires_at: Utc::now(),
+            created_at: Utc::now(),
+        };
+        drop(session);
     }
 
     #[test]
