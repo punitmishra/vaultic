@@ -606,32 +606,54 @@ impl PasswordGenerator {
         let mut rng = OsRng;
 
         for _ in 0..self.length {
-            let idx = (rng.next_u32() as usize) % charset.len();
+            let idx = uniform_index(&mut rng, charset.len());
             password.push(charset[idx]);
         }
 
         password
     }
 
-    /// Generate a memorable passphrase
+    /// Generate a memorable passphrase from the EFF large wordlist
+    /// (7776 words → ~12.9 bits of entropy per word).
     pub fn generate_passphrase(word_count: usize) -> String {
-        // Simple word list (in production, use EFF wordlist)
-        const WORDS: &[&str] = &[
-            "correct", "horse", "battery", "staple", "quantum", "crystal", "thunder", "phoenix",
-            "dragon", "silver", "golden", "cosmic", "nebula", "galaxy", "solar", "lunar",
-            "stellar", "orbital", "cipher", "vector", "matrix", "prism", "vertex", "helix",
-            "carbon", "silicon", "helium", "neon", "argon", "xenon",
-        ];
-
+        let words = eff_wordlist();
         let mut rng = OsRng;
-        let mut words = Vec::with_capacity(word_count);
+        let mut chosen = Vec::with_capacity(word_count);
 
         for _ in 0..word_count {
-            let idx = (rng.next_u32() as usize) % WORDS.len();
-            words.push(WORDS[idx]);
+            let idx = uniform_index(&mut rng, words.len());
+            chosen.push(words[idx]);
         }
 
-        words.join("-")
+        chosen.join("-")
+    }
+}
+
+/// The EFF large wordlist (7776 words). Embedded verbatim from EFF's published
+/// file (`dice-number<TAB>word` per line) so it can be diffed against the
+/// upstream source; we return just the words.
+fn eff_wordlist() -> Vec<&'static str> {
+    include_str!("eff_large_wordlist.txt")
+        .lines()
+        .filter_map(|line| line.split_whitespace().last())
+        .collect()
+}
+
+/// Draw a uniformly distributed index in `0..n` from a CSPRNG using rejection
+/// sampling. This removes the modulo bias of `next_u32() % n`, which slightly
+/// over-weights the first `u32::MAX % n` residues. `n` must be non-zero and
+/// fit in a `u32` (all call sites use small alphabets / wordlists).
+fn uniform_index<R: RngCore>(rng: &mut R, n: usize) -> usize {
+    debug_assert!(n > 0 && n <= u32::MAX as usize);
+    let n = n as u32;
+    // Accept only values in the largest multiple of `n` below 2^32 so every
+    // residue class is represented equally often.
+    let zone = u32::MAX - (u32::MAX % n);
+    loop {
+        let v = rng.next_u32();
+        if v < zone {
+            return (v % n) as usize;
+        }
     }
 }
 
@@ -687,6 +709,45 @@ mod tests {
 
         let entropy = PasswordAnalyzer::entropy(&password);
         assert!(entropy > 60.0);
+    }
+
+    #[test]
+    fn test_password_uses_only_selected_charset() {
+        // A digits-only generator must never emit a non-digit, even over a
+        // long run — guards against the rejection-sampling change regressing.
+        let pw = PasswordGenerator::new(256)
+            .with_lowercase(false)
+            .with_uppercase(false)
+            .with_digits(true)
+            .with_symbols(false)
+            .generate();
+        assert_eq!(pw.len(), 256);
+        assert!(pw.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_passphrase_uses_eff_wordlist() {
+        let words = eff_wordlist();
+        assert_eq!(words.len(), 7776, "EFF large wordlist must have 7776 words");
+        let set: std::collections::HashSet<&str> = words.iter().copied().collect();
+
+        let phrase = PasswordGenerator::generate_passphrase(6);
+        let parts: Vec<&str> = phrase.split('-').collect();
+        assert_eq!(parts.len(), 6);
+        for w in parts {
+            assert!(set.contains(w), "word `{w}` is not from the EFF wordlist");
+        }
+    }
+
+    #[test]
+    fn test_uniform_index_in_range() {
+        let mut rng = OsRng;
+        for _ in 0..2000 {
+            assert!(uniform_index(&mut rng, 10) < 10);
+            assert!(uniform_index(&mut rng, 94) < 94);
+        }
+        // n == 1 is a degenerate case that must always yield 0.
+        assert_eq!(uniform_index(&mut rng, 1), 0);
     }
 
     #[test]

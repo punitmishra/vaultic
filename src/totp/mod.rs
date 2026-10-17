@@ -8,7 +8,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
+use subtle::ConstantTimeEq;
 use thiserror::Error;
+
+/// Compare a candidate TOTP code against the user-supplied one in constant
+/// time. The code *length* is not secret, so a length mismatch short-circuits;
+/// equal-length inputs are compared without early exit to avoid leaking how
+/// many leading digits matched via a timing side channel.
+fn codes_match(candidate: &str, provided: &str) -> bool {
+    let a = candidate.as_bytes();
+    let b = provided.as_bytes();
+    a.len() == b.len() && bool::from(a.ct_eq(b))
+}
 
 /// TOTP errors
 #[derive(Debug, Error)]
@@ -206,11 +217,11 @@ impl Totp {
 
         for offset in 0..=skew {
             // Check current and past periods
-            if self.generate_hotp(current_counter - offset)? == code {
+            if codes_match(&self.generate_hotp(current_counter - offset)?, code) {
                 return Ok(true);
             }
             // Check future periods (for clock skew)
-            if offset > 0 && self.generate_hotp(current_counter + offset)? == code {
+            if offset > 0 && codes_match(&self.generate_hotp(current_counter + offset)?, code) {
                 return Ok(true);
             }
         }
@@ -523,6 +534,20 @@ mod tests {
 
         // Wrong code should fail
         assert!(!totp.verify("000000").unwrap());
+
+        // A code of the wrong length must not match, and must not panic.
+        assert!(!totp.verify("").unwrap());
+        assert!(!totp.verify("00000").unwrap());
+        assert!(!totp.verify("0000000").unwrap());
+    }
+
+    #[test]
+    fn test_codes_match_constant_time_helper() {
+        assert!(codes_match("287082", "287082"));
+        assert!(!codes_match("287082", "287083"));
+        // Length mismatch (non-secret) short-circuits to false.
+        assert!(!codes_match("287082", "28708"));
+        assert!(!codes_match("287082", ""));
     }
 
     #[test]
