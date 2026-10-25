@@ -4,33 +4,33 @@
 class Vaultic < Formula
   desc "Local-first, hardware-backed password manager with CLI, TUI, and GUI"
   homepage "https://github.com/punitmishra/vaultic"
-  version "2.2.0"
+  version "2.3.0"
   license "MIT"
 
-  # SHA256 placeholders are substituted by the update-homebrew job in
-  # .github/workflows/release.yml when a new tag is pushed. Keep them
-  # in this exact form so the sed substitution finds them.
+  # The sha256 values below are kept current by the update-homebrew job in
+  # .github/workflows/release.yml: on each tag it rewrites the sha256 line
+  # following each release URL (idempotent — no one-shot placeholders).
 
   on_macos do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_ARM64"
+      sha256 "7d792b35890fb8e467697b35414c972ce0c956022b32cbd8390d2799f6ef60e9"
     end
     on_intel do
-      # Intel macOS uses ARM64 binary via Rosetta 2
+      # Intel macOS uses the ARM64 binary via Rosetta 2.
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_ARM64"
+      sha256 "7d792b35890fb8e467697b35414c972ce0c956022b32cbd8390d2799f6ef60e9"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-aarch64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_ARM64"
+      sha256 "1f7e61b64e69718457993b99c51e608abee0c40195ce352515fbea10ac725917"
     end
     on_intel do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-x86_64.tar.gz"
-      sha256 "PLACEHOLDER_SHA256_LINUX_X86_64"
+      sha256 "e3b092ab9187beac47bc2967192663311c345f8a38aca9464d6cd03ef1e37273"
     end
   end
 
