@@ -136,7 +136,7 @@ impl VaultStorage {
     /// Open or create a vault at the given path
     pub fn open(path: impl AsRef<Path>) -> StorageResult<Self> {
         let path = path.as_ref().to_path_buf();
-        let db = sled::open(&path)?;
+        let db = Self::open_db_with_retry(&path)?;
 
         Ok(Self {
             db,
@@ -144,6 +144,40 @@ impl VaultStorage {
             cipher: None,
             metadata: None,
         })
+    }
+
+    /// Open the sled database, retrying briefly on transient lock contention.
+    ///
+    /// sled holds an exclusive advisory lock on the database directory and
+    /// releases it when the `Db` is dropped — but the release can lag the drop
+    /// by a few milliseconds while background flush/close finishes. Reopening
+    /// the same vault immediately after closing it (e.g. `migrate` right after
+    /// creating the vault, or the CLI reopening just as `vaultic-agent` lets
+    /// go) can then hit a spurious `WouldBlock`. Retry a handful of times with
+    /// a short backoff before surfacing the error; the common no-contention
+    /// case succeeds on the first attempt and never sleeps.
+    fn open_db_with_retry(path: &Path) -> StorageResult<Db> {
+        use std::io::ErrorKind;
+        use std::time::Duration;
+
+        const MAX_ATTEMPTS: usize = 10;
+        const BACKOFF: Duration = Duration::from_millis(50);
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match sled::open(path) {
+                Ok(db) => return Ok(db),
+                // Transient advisory-lock contention: back off and retry until
+                // the budget is exhausted, then let the error surface.
+                Err(sled::Error::Io(e))
+                    if e.kind() == ErrorKind::WouldBlock && attempt < MAX_ATTEMPTS =>
+                {
+                    std::thread::sleep(BACKOFF);
+                }
+                Err(e) => return Err(StorageError::Database(e)),
+            }
+        }
     }
 
     /// Create a new vault with the given master key
