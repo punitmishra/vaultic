@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-24
+
 ### Security — audit remediation sweep
 
 A full sweep of a read-only security audit's confirmed findings. Each
@@ -402,7 +404,8 @@ Initial release. Core functionality: vault init/unlock/lock, encrypted
 storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
-[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/punitmishra/vaultic/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/punitmishra/vaultic/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/punitmishra/vaultic/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/punitmishra/vaultic/compare/v2.0.1...v2.0.2
