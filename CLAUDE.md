@@ -14,16 +14,18 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: current tree post-v2.2.0 (MCP + sequoia 2.3 → v2.3.0)
+## Current Status: v2.3.0
 
-### Checkpoint: 2026-08-22
+### Checkpoint: 2026-10-24
 
-> Released v2.2.0 shipped three binaries (CLI/TUI, daemon, GUI) + the
-> CLI↔daemon bridge. `vaultic-mcp` (#43) and the sequoia 2.3 bump (#42)
-> are merged but **unreleased**, landing in v2.3.0. Counts below reflect
-> the current tree.
+> v2.3.0 ships the fourth binary `vaultic-mcp` (#43) and the sequoia 2.3
+> bump (#42), plus the full audit-remediation sweep (findings #1–#9:
+> authenticated sharing, KDF honoring stored params, secret-lifecycle
+> zeroization, constant-time TOTP + unbiased generation, clipboard
+> auto-clear, bincode 1→2 byte-identical, and gating `cargo audit`).
+> Counts below reflect the released tree.
 
-**Build Status**: COMPILING AND RUNNING (four binaries; `vaultic-mcp` unreleased → v2.3.0)
+**Build Status**: COMPILING AND RUNNING (four binaries)
 **Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app), `vaultic-mcp` (MCP server)
 **Tests**: 522 passing (240 lib + 218 bin + 59 integration + 5 doc) on `main`
 **Core Workflow**: FULLY FUNCTIONAL

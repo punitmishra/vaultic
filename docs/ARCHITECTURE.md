@@ -201,9 +201,9 @@ in the worker pumps them into tokio mpsc.
 | `tests/agent_integration.rs` | Spins up `vaultic-agent` on a temp socket against a fixture vault and exercises every protocol method through real Unix-socket frames |
 | `benches/vault_ops.rs` | Criterion benchmarks for list / search / get / add / unlock against a 10k-entry vault |
 
-`cargo test --release` runs everything except benches. Total: 439
-tests on the current tree (the released 2.2.0 shipped 435;
-`vaultic-mcp` adds the rest).
+`cargo test --release` runs everything except benches. Total: 522
+tests on the current tree (v2.3.0), up from 435 at v2.2.0 as the MCP
+server and the audit-remediation sweep landed.
 
 ## Known seams (for future contributors)
 
