@@ -196,6 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -206,29 +207,49 @@ jobs:
         with:
           path: artifacts
 
-      - name: Update Formula SHA256
+      - name: Update formula version and checksums
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
+          export VERSION
+          export SHA_MACOS_ARM64=$(awk '{print $1}' artifacts/vaultic-macos-aarch64/vaultic-macos-aarch64.tar.gz.sha256)
+          export SHA_LINUX_ARM64=$(awk '{print $1}' artifacts/vaultic-linux-aarch64/vaultic-linux-aarch64.tar.gz.sha256)
+          export SHA_LINUX_X86=$(awk '{print $1}' artifacts/vaultic-linux-x86_64/vaultic-linux-x86_64.tar.gz.sha256)
 
-          # Get SHA256 values
-          SHA_MACOS_ARM64=$(cat artifacts/vaultic-macos-aarch64/vaultic-macos-aarch64.tar.gz.sha256 | awk '{print $1}')
-          SHA_MACOS_X86=$(cat artifacts/vaultic-macos-x86_64/vaultic-macos-x86_64.tar.gz.sha256 | awk '{print $1}')
-          SHA_LINUX_ARM64=$(cat artifacts/vaultic-linux-aarch64/vaultic-linux-aarch64.tar.gz.sha256 | awk '{print $1}')
-          SHA_LINUX_X86=$(cat artifacts/vaultic-linux-x86_64/vaultic-linux-x86_64.tar.gz.sha256 | awk '{print $1}')
-
-          # Update formula
-          sed -i "s/version \".*\"/version \"$VERSION\"/" Formula/vaultic.rb
-          sed -i "s/PLACEHOLDER_SHA256_ARM64/$SHA_MACOS_ARM64/" Formula/vaultic.rb
-          sed -i "s/PLACEHOLDER_SHA256_X86_64/$SHA_MACOS_X86/" Formula/vaultic.rb
-          sed -i "s/PLACEHOLDER_SHA256_LINUX_ARM64/$SHA_LINUX_ARM64/" Formula/vaultic.rb
-          sed -i "s/PLACEHOLDER_SHA256_LINUX_X86_64/$SHA_LINUX_X86/" Formula/vaultic.rb
+          # Idempotent rewrite (works on every release, not just once): set the
+          # version, then replace the sha256 that immediately follows each
+          # release URL. Intel macOS intentionally uses the ARM64 binary via
+          # Rosetta 2, so both macOS blocks take the macOS ARM64 checksum.
+          # perl (not sed) so the behavior is identical on the CI runner and on
+          # a maintainer's machine, and multi-line matching is straightforward.
+          perl -0777 -pi -e '
+            s/^(  version ")[^"]*/${1}$ENV{VERSION}/m;
+            s/(vaultic-macos-aarch64\.tar\.gz"\s*\n\s*sha256 ")[^"]*/${1}$ENV{SHA_MACOS_ARM64}/g;
+            s/(vaultic-linux-aarch64\.tar\.gz"\s*\n\s*sha256 ")[^"]*/${1}$ENV{SHA_LINUX_ARM64}/g;
+            s/(vaultic-linux-x86_64\.tar\.gz"\s*\n\s*sha256 ")[^"]*/${1}$ENV{SHA_LINUX_X86}/g;
+          ' Formula/vaultic.rb
 
           cat Formula/vaultic.rb
 
-      - name: Commit Formula Update
+      - name: Open formula-update pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          if git diff --quiet Formula/vaultic.rb; then
+            echo "Formula already current for ${TAG}; nothing to do."
+            exit 0
+          fi
+          branch="homebrew-formula-${TAG}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
           git add Formula/vaultic.rb
-          git commit -m "Update Homebrew formula for ${GITHUB_REF#refs/tags/}" || echo "No changes to commit"
-          git push
+          git commit -m "Update Homebrew formula for ${TAG}"
+          git push --force origin "$branch"
+          # main is a protected branch, so land the bump via PR rather than a
+          # direct push. Requires "Allow GitHub Actions to create and approve
+          # pull requests" (repo Settings → Actions → General).
+          gh pr create --base main --head "$branch" \
+            --title "Update Homebrew formula for ${TAG}" \
+            --body "Automated Homebrew formula bump for ${TAG}: version and sha256 checksums from the release assets. Merge to keep \`brew install vaultic\` current." \
+            || echo "Could not open PR automatically (is 'Allow GitHub Actions to create and approve pull requests' enabled?). Branch '$branch' is pushed; open the PR manually."
