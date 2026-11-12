@@ -175,8 +175,16 @@ impl VaultStorage {
                 Ok(db) => return Ok(db),
                 // Transient advisory-lock contention: back off and retry until
                 // the budget is exhausted, then let the error surface.
+                //
+                // sled surfaces lock contention as an `io::Error` of kind
+                // `Other` whose message is "could not acquire lock on <path>:
+                // ... WouldBlock ..." — NOT kind `WouldBlock` — so match the
+                // message, not just the kind (matching only the kind made this
+                // retry a silent no-op and let the flakes through).
                 Err(sled::Error::Io(e))
-                    if e.kind() == ErrorKind::WouldBlock && attempt < MAX_ATTEMPTS =>
+                    if attempt < MAX_ATTEMPTS
+                        && (e.kind() == ErrorKind::WouldBlock
+                            || e.to_string().contains("could not acquire lock")) =>
                 {
                     std::thread::sleep(BACKOFF);
                 }
@@ -904,6 +912,43 @@ mod tests {
         let entries = storage2.list_entries().unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "GitHub");
+    }
+
+    #[test]
+    fn test_open_retries_through_held_lock() {
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        // First handle creates the vault and holds the sled advisory lock.
+        let holder = VaultStorage::create(
+            &vault_path,
+            "Held",
+            &MasterKey::generate(),
+            crate::crypto::KeyDeriver::generate_params(),
+            "fp".to_string(),
+        )
+        .unwrap();
+
+        // Release the lock after a short delay — well under the retry budget.
+        let releaser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            drop(holder);
+        });
+
+        // open() must retry past the transiently-held lock and then succeed.
+        // Before the lock-error detection fix this returned Err immediately
+        // (sled's lock error is io kind `Other`, not `WouldBlock`), so this
+        // asserts the retry actually engages rather than silently no-op'ing.
+        let reopened = VaultStorage::open(&vault_path);
+        releaser.join().unwrap();
+        assert!(
+            reopened.is_ok(),
+            "open should retry through a transiently-held sled lock, got {:?}",
+            reopened.err()
+        );
     }
 
     #[test]
