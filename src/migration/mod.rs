@@ -12,8 +12,46 @@ use uuid::Uuid;
 use crate::crypto::kek::derive_from_password;
 use crate::crypto::keys::{MethodData, UnlockMethod, VaultKey, VaultKeyring};
 use crate::crypto::wrap::wrap_vault_key;
+use crate::crypto::MasterKey;
+use crate::models::KdfParams;
 use crate::storage::keyring::{detect_vault_version, KeyringStorage, VaultVersion};
 use crate::storage::{KdfParamsStorage, StorageError, VaultStorage};
+
+/// Write a v2 password keyring for a vault whose data is encrypted under
+/// `master_key`.
+///
+/// The vault key stored in the keyring IS the master key (same bytes), and the
+/// wrapping KEK is derived from the same password + KDF parameters — so the
+/// keyring is purely additive: existing encrypted data stays valid, `unlock`
+/// keeps working via the password, and further unlock methods (recovery key,
+/// YubiKey, GPG) can later wrap the same vault key under their own KEKs.
+///
+/// Shared by [`VaultMigrator::migrate`] (v1 → v2 upgrade) and by `vaultic init`
+/// (so a brand-new vault is multi-method-ready without a separate `migrate`).
+pub fn write_password_keyring(
+    vault_path: &Path,
+    vault_id: Uuid,
+    master_key: &MasterKey,
+    password: &[u8],
+    kdf_params: &KdfParams,
+) -> Result<(), StorageError> {
+    let vault_key = VaultKey::from_bytes(*master_key.as_bytes());
+    let kek = derive_from_password(password, kdf_params).map_err(StorageError::Crypto)?;
+    let encrypted_vault_key = wrap_vault_key(
+        &vault_key,
+        &kek,
+        UnlockMethod::Password,
+        MethodData::Password {
+            params: kdf_params.clone(),
+        },
+        Some("Master Password".to_string()),
+    )
+    .map_err(StorageError::Crypto)?;
+
+    let mut keyring = VaultKeyring::new(vault_id);
+    keyring.add_key(encrypted_vault_key);
+    KeyringStorage::new(vault_path).save(&keyring)
+}
 
 /// Result of a migration operation
 #[derive(Debug, Clone)]
@@ -110,32 +148,16 @@ impl VaultMigrator {
         // Step 3: Create backup of kdf_params.json
         let backup_path = self.backup_kdf_params()?;
 
-        // Step 4: For simplicity in migration, we'll use the old master key AS
-        // the vault key. This means existing encrypted entries remain valid.
-        // The key hierarchy benefit is that we can now add more unlock methods.
-        let vault_key = VaultKey::from_bytes(*old_master_key.as_bytes());
-
-        // Step 5: Create KEK from password and wrap the vault key
-        let kek =
-            derive_from_password(password.as_bytes(), &kdf_params).map_err(StorageError::Crypto)?;
-
-        let encrypted_vault_key = wrap_vault_key(
-            &vault_key,
-            &kek,
-            UnlockMethod::Password,
-            MethodData::Password {
-                params: kdf_params.clone(),
-            },
-            Some("Master Password".to_string()),
-        )
-        .map_err(StorageError::Crypto)?;
-
-        // Step 6: Create and save keyring
-        let mut keyring = VaultKeyring::new(vault_id);
-        keyring.add_key(encrypted_vault_key);
-
-        let keyring_storage = KeyringStorage::new(&self.vault_path);
-        keyring_storage.save(&keyring)?;
+        // Step 4: Write the v2 keyring. The old master key becomes the vault
+        // key (so existing encrypted entries remain valid) wrapped under a
+        // password KEK; more unlock methods can be added afterwards.
+        write_password_keyring(
+            &self.vault_path,
+            vault_id,
+            &old_master_key,
+            password.as_bytes(),
+            &kdf_params,
+        )?;
 
         Ok(MigrationReport {
             entry_count: entries.len(),
@@ -393,5 +415,45 @@ mod tests {
 
         migrate_vault(&vault_path, "password123").unwrap();
         assert!(!can_migrate(&vault_path));
+    }
+
+    #[test]
+    fn test_write_password_keyring_makes_vault_v2() {
+        // This is what `vaultic init` now does on top of VaultStorage::create,
+        // so a fresh vault is multi-method-ready (recovery / YubiKey / GPG)
+        // with no separate `migrate` step.
+        let dir = tempdir().unwrap();
+        let vault_path = dir.path().join("test_vault");
+        let (master_key, kdf_params) = create_v1_vault(&vault_path, "password123");
+
+        assert_eq!(detect_vault_version(&vault_path), VaultVersion::V1);
+
+        // The keyring's vault_id matches the metadata id, as init records it.
+        let mut storage = VaultStorage::open(&vault_path).unwrap();
+        storage.unlock(&master_key).unwrap();
+        let vault_id = storage.metadata().unwrap().id;
+        drop(storage);
+
+        write_password_keyring(
+            &vault_path,
+            vault_id,
+            &master_key,
+            b"password123",
+            &kdf_params,
+        )
+        .unwrap();
+
+        // Now v2, with one password unlock method.
+        assert_eq!(detect_vault_version(&vault_path), VaultVersion::V2);
+        let keyring = KeyringStorage::new(&vault_path).load().unwrap();
+        assert_eq!(keyring.vault_id, vault_id);
+        assert_eq!(keyring.keys.len(), 1);
+        assert_eq!(keyring.keys[0].method, UnlockMethod::Password);
+
+        // The wrapped vault key unwraps (via the password KEK) to the master
+        // key, so existing data stays decryptable and `unlock` is unaffected.
+        let kek = derive_from_password(b"password123", &kdf_params).unwrap();
+        let vault_key = crate::crypto::wrap::unwrap_vault_key(&keyring.keys[0], &kek).unwrap();
+        assert_eq!(vault_key.as_bytes(), &master_key.as_bytes()[..]);
     }
 }
