@@ -668,17 +668,23 @@ impl PasswordGenerator {
 
     /// Generate a memorable passphrase from the EFF large wordlist
     /// (7776 words → ~12.9 bits of entropy per word).
-    pub fn generate_passphrase(word_count: usize) -> String {
+    /// Pick `word_count` words, each drawn uniformly (rejection-sampled, no
+    /// modulo bias) from the EFF large wordlist.
+    ///
+    /// Exposed alongside [`generate_passphrase`] so callers and tests can
+    /// inspect the chosen words directly: the EFF list contains a few
+    /// hyphenated words (e.g. `drop-down`, `t-shirt`), so a `-`-joined
+    /// passphrase cannot be split back into exactly `word_count` words.
+    pub fn generate_passphrase_words(word_count: usize) -> Vec<&'static str> {
         let words = eff_wordlist();
         let mut rng = OsRng;
-        let mut chosen = Vec::with_capacity(word_count);
+        (0..word_count)
+            .map(|_| words[uniform_index(&mut rng, words.len())])
+            .collect()
+    }
 
-        for _ in 0..word_count {
-            let idx = uniform_index(&mut rng, words.len());
-            chosen.push(words[idx]);
-        }
-
-        chosen.join("-")
+    pub fn generate_passphrase(word_count: usize) -> String {
+        Self::generate_passphrase_words(word_count).join("-")
     }
 }
 
@@ -812,12 +818,21 @@ mod tests {
         assert_eq!(words.len(), 7776, "EFF large wordlist must have 7776 words");
         let set: std::collections::HashSet<&str> = words.iter().copied().collect();
 
-        let phrase = PasswordGenerator::generate_passphrase(6);
-        let parts: Vec<&str> = phrase.split('-').collect();
-        assert_eq!(parts.len(), 6);
-        for w in parts {
+        // Inspect the chosen words directly rather than splitting the joined
+        // string: the EFF list has a few hyphenated words (drop-down, t-shirt,
+        // felt-tip, yo-yo), so `split('-')` would not round-trip to exactly 6
+        // words and the old assertion flaked whenever one was drawn.
+        let chosen = PasswordGenerator::generate_passphrase_words(6);
+        assert_eq!(chosen.len(), 6);
+        for w in &chosen {
             assert!(set.contains(w), "word `{w}` is not from the EFF wordlist");
         }
+
+        // The joined passphrase is those words separated by '-', so it is
+        // non-empty and only lowercase letters and hyphens.
+        let phrase = PasswordGenerator::generate_passphrase(6);
+        assert!(!phrase.is_empty());
+        assert!(phrase.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
     }
 
     #[test]
