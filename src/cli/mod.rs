@@ -1332,12 +1332,30 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 crate::crypto::KeyDeriver::derive_from_password(password.as_bytes(), &kdf_params)
                     .map_err(|e| format!("Key derivation failed: {}", e))?;
 
-            crate::storage::VaultStorage::create(
+            let storage = crate::storage::VaultStorage::create(
                 &vault_path,
                 &name,
                 &master_key,
-                kdf_params,
+                kdf_params.clone(),
                 "local".to_string(),
+            )?;
+
+            // Make the new vault multi-method-ready (v2) from the start, so
+            // recovery keys / YubiKey / GPG unlock work immediately without a
+            // separate `vaultic migrate`. The vault key is the password-derived
+            // master key wrapped under a password KEK — identical to what
+            // `migrate` produces, so `unlock` and the GUI/agent are unaffected.
+            let vault_id = storage
+                .metadata()
+                .map(|m| m.id)
+                .unwrap_or_else(uuid::Uuid::new_v4);
+            drop(storage);
+            crate::migration::write_password_keyring(
+                &vault_path,
+                vault_id,
+                &master_key,
+                password.as_bytes(),
+                &kdf_params,
             )?;
 
             Output::success(&format!("Vault created at {:?}", vault_path));
