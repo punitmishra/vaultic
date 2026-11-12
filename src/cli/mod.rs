@@ -3700,7 +3700,10 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             Output::info("(password, recovery key, YubiKey, GPG)");
             println!();
 
-            // Get password
+            // Get password. Supplying --password (or VAULTIC_PASSWORD) signals
+            // non-interactive use, which also skips the confirmation prompt
+            // below so `migrate` is fully scriptable.
+            let non_interactive = password.is_some();
             let password = match password {
                 Some(p) => p,
                 None => Prompts::master_password(false)?,
@@ -3722,8 +3725,9 @@ pub fn run_command(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else {
-                // Confirm migration
-                if !Prompts::confirm("Proceed with migration?", true)? {
+                // Confirm migration (skipped when non-interactive, i.e. a
+                // password was supplied via --password / VAULTIC_PASSWORD).
+                if !non_interactive && !Prompts::confirm("Proceed with migration?", true)? {
                     Output::info("Migration cancelled");
                     return Ok(());
                 }
