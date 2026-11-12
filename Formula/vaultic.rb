@@ -4,7 +4,7 @@
 class Vaultic < Formula
   desc "Local-first, hardware-backed password manager with CLI, TUI, and GUI"
   homepage "https://github.com/punitmishra/vaultic"
-  version "2.3.0"
+  version "2.3.1"
   license "MIT"
 
   # The sha256 values below are kept current by the update-homebrew job in
@@ -14,23 +14,23 @@ class Vaultic < Formula
   on_macos do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
-      sha256 "7d792b35890fb8e467697b35414c972ce0c956022b32cbd8390d2799f6ef60e9"
+      sha256 "c081dcbea671de018bab70577e21d459805f013153e7737cc933c584680bdb2a"
     end
     on_intel do
       # Intel macOS uses the ARM64 binary via Rosetta 2.
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-macos-aarch64.tar.gz"
-      sha256 "7d792b35890fb8e467697b35414c972ce0c956022b32cbd8390d2799f6ef60e9"
+      sha256 "c081dcbea671de018bab70577e21d459805f013153e7737cc933c584680bdb2a"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-aarch64.tar.gz"
-      sha256 "1f7e61b64e69718457993b99c51e608abee0c40195ce352515fbea10ac725917"
+      sha256 "e93d301c590cf3eda11acb83d9f55c116951a018a1a31d65f566315fbdaa67ec"
     end
     on_intel do
       url "https://github.com/punitmishra/vaultic/releases/download/v#{version}/vaultic-linux-x86_64.tar.gz"
-      sha256 "e3b092ab9187beac47bc2967192663311c345f8a38aca9464d6cd03ef1e37273"
+      sha256 "bdc49368c0517a32426fc5b4d266d5a641165f185cbc61a982216f5f13f3a36e"
     end
   end
 
