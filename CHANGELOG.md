@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-12
+
+### Fixed
+
+- **`vaultic init` now creates a v2 (multi-method) vault**
+  ([#68](https://github.com/punitmishra/vaultic/pull/68)). A brand-new
+  vault is ready for recovery keys, YubiKey, and GPG unlock immediately —
+  `recovery generate` / `unlock-method` no longer fail with "This vault
+  uses the v1 format. Run 'vaultic migrate' first." right after `init`.
+  Existing v1 vaults and `migrate` are unchanged.
+- **`vaultic migrate --password` runs non-interactively**
+  ([#69](https://github.com/punitmishra/vaultic/pull/69)). Supplying a
+  password (or `VAULTIC_PASSWORD`) now also skips the confirmation prompt,
+  so migration is scriptable instead of failing with "not a terminal".
+- **Homebrew formula publishes correctly**
+  ([#66](https://github.com/punitmishra/vaultic/pull/66)). The release
+  workflow's formula update no longer fails against protected `main` (it
+  opens a PR) and is idempotent, so `brew install vaultic` gets the current
+  version with valid checksums.
+
+### Internal
+
+- De-flaked the EFF passphrase test, which could fail ~0.3% of runs when a
+  hyphenated wordlist entry (`drop-down`, `t-shirt`, …) was drawn; added
+  `generate_passphrase_words` ([#70](https://github.com/punitmishra/vaultic/pull/70)).
+- Fixed the sled open-retry so it actually engages on lock contention (it
+  had matched the wrong `io::Error` kind and silently no-op'd), eliminating
+  intermittent storage-test flakes on CI
+  ([#72](https://github.com/punitmishra/vaultic/pull/72),
+  [#73](https://github.com/punitmishra/vaultic/pull/73)).
+- Fixed the CHANGELOG v2.2.0/v2.3.0 compare links
+  ([#67](https://github.com/punitmishra/vaultic/pull/67)).
+
 ## [2.3.0] - 2026-10-24
 
 ### Security — audit remediation sweep
@@ -404,7 +437,8 @@ Initial release. Core functionality: vault init/unlock/lock, encrypted
 storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
-[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/punitmishra/vaultic/compare/v2.3.0...v2.3.1
 <!-- v2.2.0 shipped on 2026-05-28 but was never git-tagged, so these two
      links use its release commit (c6b778a) in place of a `v2.2.0` tag. -->
 [2.3.0]: https://github.com/punitmishra/vaultic/compare/c6b778ac4afef23457d9729aa1b0d93e6d531a69...v2.3.0
