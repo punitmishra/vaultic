@@ -160,8 +160,13 @@ impl VaultStorage {
         use std::io::ErrorKind;
         use std::time::Duration;
 
-        const MAX_ATTEMPTS: usize = 10;
-        const BACKOFF: Duration = Duration::from_millis(50);
+        // Generous budget (~5s). On a loaded CI runner, sled's advisory-lock
+        // release after a `Db` drop can lag well past half a second, which
+        // flaked create→drop→reopen tests even with a short retry. Only the
+        // contended path ever waits; an uncontended open succeeds on the first
+        // attempt with no delay.
+        const MAX_ATTEMPTS: usize = 50;
+        const BACKOFF: Duration = Duration::from_millis(100);
 
         let mut attempt = 0;
         loop {
@@ -194,7 +199,10 @@ impl VaultStorage {
             return Err(StorageError::VaultAlreadyExists);
         }
 
-        let db = sled::open(&path)?;
+        // Same transient-lock retry as `open` (see `open_db_with_retry`): a
+        // create right after a prior handle on the path was dropped can race
+        // sled's lock release.
+        let db = Self::open_db_with_retry(&path)?;
         let derived = master_key.derive_keys();
         let cipher = Cipher::new(&derived.encryption_key);
 
