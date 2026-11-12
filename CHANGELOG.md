@@ -405,8 +405,10 @@ storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
 [Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.0...HEAD
-[2.3.0]: https://github.com/punitmishra/vaultic/compare/v2.2.0...v2.3.0
-[2.2.0]: https://github.com/punitmishra/vaultic/compare/v2.1.0...v2.2.0
+<!-- v2.2.0 shipped on 2026-05-28 but was never git-tagged, so these two
+     links use its release commit (c6b778a) in place of a `v2.2.0` tag. -->
+[2.3.0]: https://github.com/punitmishra/vaultic/compare/c6b778ac4afef23457d9729aa1b0d93e6d531a69...v2.3.0
+[2.2.0]: https://github.com/punitmishra/vaultic/compare/v2.1.0...c6b778ac4afef23457d9729aa1b0d93e6d531a69
 [2.1.0]: https://github.com/punitmishra/vaultic/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/punitmishra/vaultic/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/punitmishra/vaultic/compare/v2.0.0...v2.0.1
