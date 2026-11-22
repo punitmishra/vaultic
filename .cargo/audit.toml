@@ -20,15 +20,27 @@ ignore = [
     # so the rebinding vector is unreachable. No upstream fix is available.
     "RUSTSEC-2026-0189",
 
-    # quinn-proto ×5 — QUIC panics / memory-exhaustion in the QUIC transport.
-    # quinn-proto is pulled into Cargo.lock only through reqwest's OPTIONAL
-    # HTTP/3 feature, which Vaultic does not enable. It is not compiled into any
-    # binary: `cargo tree -i quinn-proto` reports "nothing to print". Vaultic's
-    # only network use is outbound HTTPS (HIBP, Ollama) over the default
-    # TCP/TLS stack. No code path reaches QUIC. No upstream fix is available.
+    # quinn-proto / quinn-udp — QUIC panics / memory-exhaustion in the QUIC
+    # transport. These crates are pulled into Cargo.lock only through reqwest's
+    # OPTIONAL HTTP/3 feature, which Vaultic does not enable. They are not
+    # compiled into any binary: `cargo tree -i quinn-proto` and
+    # `cargo tree -i quinn-udp` both report "nothing to print". Vaultic's only
+    # network use is outbound HTTPS (HIBP, Ollama) over the default TCP/TLS
+    # stack; no code path reaches QUIC. No upstream fix is available.
     "RUSTSEC-2026-0338",
     "RUSTSEC-2026-0339",
     "RUSTSEC-2026-0340",
     "RUSTSEC-2026-0341",
     "RUSTSEC-2026-0342",
+    "RUSTSEC-2026-0523",
+    "RUSTSEC-2026-0524",
+    "RUSTSEC-2026-0538",
+
+    # url — stack overflow in `Url::origin()` on deeply nested `blob:` URLs.
+    # `url` is a transitive dependency (via reqwest) used only to parse the
+    # controlled HIBP / Ollama endpoint URLs; Vaultic never calls
+    # `Url::origin()` (grep: no `.origin()` call sites) and never parses
+    # untrusted `blob:` URLs. No upstream fix is available yet; re-check on the
+    # next `url` release and drop this waiver once patched.
+    "RUSTSEC-2026-0592",
 ]
