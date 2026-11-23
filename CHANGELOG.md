@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-11-22
+
+### Added
+
+- **`vaultic-agent service install | uninstall | status`**
+  ([#22](https://github.com/punitmishra/vaultic/pull/79)) — set the agent to
+  start at login via a per-user launchd LaunchAgent (macOS) or systemd
+  `--user` unit (Linux), with no hand-written service files or root.
+
+### Security
+
+- **AI analysis refuses non-loopback plain-HTTP endpoints**
+  ([#47](https://github.com/punitmishra/vaultic/pull/76)) — pointing Ollama /
+  llama.cpp at a remote host over `http://` would send entry metadata in
+  cleartext. Loopback and `https://` are unaffected; override with
+  `VAULTIC_ALLOW_INSECURE_AI=1`.
+- **Session-file at-rest limitation documented in code**
+  ([#46](https://github.com/punitmishra/vaultic/pull/78)) — the machine-derived
+  session key is recomputable from local data; the real protection is the
+  15-min expiry. A `SECURITY` comment now says so, with the keychain /
+  daemon-held follow-up tracked in #77.
+
+### Fixed
+
+- **Dependency audit back to green + gating**
+  ([#75](https://github.com/punitmishra/vaultic/pull/75)) — upgraded
+  `rustls-webpki` 0.103.17 and `webpki-root-certs` 1.0.12 (cert-trust
+  advisories RUSTSEC-2026-0382/0383); waived the unreachable QUIC/`url`
+  advisories with rationale.
+
 ## [2.3.1] - 2026-11-12
 
 ### Fixed
@@ -437,7 +467,8 @@ Initial release. Core functionality: vault init/unlock/lock, encrypted
 storage with XChaCha20-Poly1305 + Argon2id, password generation, basic
 add/list/get commands, session management.
 
-[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/punitmishra/vaultic/compare/v2.3.2...HEAD
+[2.3.2]: https://github.com/punitmishra/vaultic/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/punitmishra/vaultic/compare/v2.3.0...v2.3.1
 <!-- v2.2.0 shipped on 2026-05-28 but was never git-tagged, so these two
      links use its release commit (c6b778a) in place of a `v2.2.0` tag. -->
