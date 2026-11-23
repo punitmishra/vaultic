@@ -14,14 +14,21 @@ This document provides context for Claude to continue developing Vaultic.
 
 ---
 
-## Current Status: v2.3.1
+## Current Status: v2.3.2
 
-### Checkpoint: 2026-11-12
+### Checkpoint: 2026-11-22
 
-> v2.3.1 is a patch release: `vaultic init` now creates a v2
-> (multi-method) vault so recovery keys / YubiKey / GPG work without a
-> separate `migrate` (#68); `migrate --password` runs non-interactively
-> (#69); and the Homebrew release path is repaired (#66).
+> v2.3.2 adds `vaultic-agent service install|uninstall|status` for
+> launchd/systemd login auto-start (#22); refuses non-loopback plain-HTTP
+> AI endpoints so vault metadata isn't leaked in cleartext (#47); documents
+> the session-file at-rest limitation in code (#46, keychain fix tracked in
+> #77); and restores the gating `cargo audit` to green (TLS crate bumps +
+> verified waivers, #75).
+>
+> v2.3.1 made `vaultic init` create a v2 (multi-method) vault so recovery
+> keys / YubiKey / GPG work without a separate `migrate` (#68); made
+> `migrate --password` non-interactive (#69); and repaired the Homebrew
+> release path (#66).
 >
 > v2.3.0 shipped the fourth binary `vaultic-mcp` (#43), the sequoia 2.3
 > bump (#42), and the full audit-remediation sweep (findings #1–#9:
@@ -32,7 +39,7 @@ This document provides context for Claude to continue developing Vaultic.
 
 **Build Status**: COMPILING AND RUNNING (four binaries)
 **Binaries**: `vaultic` (CLI/TUI), `vaultic-agent` (daemon), `vaultic-gui` (egui app), `vaultic-mcp` (MCP server)
-**Tests**: 524 passing (241 lib + 219 bin + 59 integration + 5 doc) on `main`
+**Tests**: 540 passing (249 lib + 227 bin + 59 integration + 5 doc) on `main`
 **Core Workflow**: FULLY FUNCTIONAL
 **TUI**: FULLY IMPLEMENTED + 4 themes (default/dracula/solarized-dark/monochrome)
 **GUI**: FULLY IMPLEMENTED — unlock + list + detail + live TOTP + 4 themes + keyboard nav
@@ -48,7 +55,7 @@ This document provides context for Claude to continue developing Vaultic.
 ```bash
 # Verify everything works
 cargo build --release        # Builds four binaries
-cargo test --release         # 524 passing
+cargo test --release         # 540 passing
 
 # CLI
 ./target/release/vaultic --help
@@ -140,7 +147,7 @@ cargo test --release         # 524 passing
 | `export` | COMPLETE | ~200 | JSON, CSV, encrypted backup |
 | `recovery` | COMPLETE | ~450 | BIP39 mnemonic, QR display, key wrapping |
 | `mcp` | NEW | ~500 | Model Context Protocol server for AI tool integration |
-| `tests` | COMPLETE | ~900 | 524 tests (unit, integration, doctests) |
+| `tests` | COMPLETE | ~900 | 540 tests (unit, integration, doctests) |
 
 ---
 
@@ -267,9 +274,9 @@ vaultic tui --theme dracula
 ## Test Results (Latest)
 
 ```
-cargo test: 524 tests passing
-  - 241 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
-  - 219 bin tests (CLI parsing, commands)
+cargo test: 540 tests passing
+  - 249 lib tests (crypto, storage, models, migration, recovery, ai, totp, mcp)
+  - 227 bin tests (CLI parsing, commands)
   - 59 integration tests (44 end-to-end + 15 agent protocol)
   - 5 doctests (code examples in documentation)
 
@@ -438,7 +445,7 @@ cargo build                 # Debug build
 cargo build --release       # Release build
 
 # Test
-cargo test                  # All tests (524 passing)
+cargo test                  # All tests (540 passing)
 cargo test tui              # TUI tests only
 cargo test storage          # Storage tests only
 
@@ -482,7 +489,7 @@ rm -rf /tmp/test_vault
 ## Notes for Claude
 
 1. **100% feature complete** - All core features implemented and tested
-2. **524 tests passing** - Keep them green (241 lib + 219 bin + 59 integration + 5 doc)
+2. **540 tests passing** - Keep them green (249 lib + 227 bin + 59 integration + 5 doc)
 3. **CI/CD fully configured** - GitHub Actions with matrix builds for all features
 4. **TUI is fully working** - Tested and confirmed working by user
 5. **Session system works** - Don't recreate it
