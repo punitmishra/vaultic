@@ -101,7 +101,9 @@ what it explicitly does not.
   key (§3.3), not the password. An attacker who images the whole machine
   can recompute that key. Mitigation is the 15-minute auto-expiry and
   `vaultic lock`, not cryptographic secrecy of the session file. Prefer
-  locking before the machine leaves your control.
+  locking before the machine leaves your control. Binding the session to a
+  non-recomputable secret (OS keychain / daemon-held state) is tracked in
+  [#77](https://github.com/punitmishra/vaultic/issues/77).
 - **Tampering/rollback of ciphertext.** AEAD detects modification of a given
   record, but there is no vault-wide integrity/version MAC preventing an
   attacker from reverting `db/` to an earlier encrypted snapshot.
