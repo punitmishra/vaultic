@@ -42,6 +42,22 @@ enum Command {
     Stop,
     /// Show whether a daemon is running and where its socket lives.
     Status,
+    /// Install, remove, or inspect the login auto-start service
+    /// (launchd on macOS, systemd --user on Linux).
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum ServiceAction {
+    /// Write the service file and enable it to start at login.
+    Install,
+    /// Disable and remove the service file.
+    Uninstall,
+    /// Show whether the service is installed and loaded.
+    Status,
 }
 
 fn main() -> ExitCode {
@@ -57,6 +73,12 @@ fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> ExitCode {
+    // `service` manages the launchd/systemd unit and needs no resolved socket
+    // (install embeds an explicit `--socket` override only if one was given).
+    if let Command::Service { action } = &cli.command {
+        return service_command(action, cli.socket.as_deref());
+    }
+
     let socket_path = match resolve_socket(cli.socket.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -69,6 +91,32 @@ async fn run(cli: Cli) -> ExitCode {
         Command::Status => status(&socket_path).await,
         Command::Start => start(socket_path).await,
         Command::Stop => stop(&socket_path).await,
+        Command::Service { .. } => unreachable!("handled above"),
+    }
+}
+
+/// Install / uninstall / inspect the login auto-start service. Synchronous —
+/// it only touches the filesystem and `launchctl`/`systemctl`.
+fn service_command(action: &ServiceAction, socket: Option<&std::path::Path>) -> ExitCode {
+    use vaultic::agent::service;
+    let outcome = match action {
+        ServiceAction::Install => service::install(socket).map(|path| {
+            println!("✓ vaultic-agent service installed and enabled to start at login.");
+            println!("  Service file: {}", path.display());
+        }),
+        ServiceAction::Uninstall => service::uninstall().map(|path| {
+            println!("✓ vaultic-agent service removed ({}).", path.display());
+        }),
+        ServiceAction::Status => service::status().map(|s| {
+            println!("vaultic-agent service: {}", s);
+        }),
+    };
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("vaultic-agent: {}", e);
+            ExitCode::from(1)
+        }
     }
 }
 

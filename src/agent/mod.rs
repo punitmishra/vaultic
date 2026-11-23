@@ -14,6 +14,7 @@ pub mod locked_key;
 pub mod paths;
 pub mod protocol;
 pub mod server;
+pub mod service;
 pub mod state;
 
 // These re-exports are public-API conveniences for users of the `vaultic`
