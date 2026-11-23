@@ -36,6 +36,9 @@ pub enum AiError {
 
     #[error("Encryption error: {0}")]
     EncryptionError(String),
+
+    #[error("Refusing to send vault metadata to {0} over plain HTTP (it would be sent in cleartext to a non-local host). Use an https:// endpoint, keep the AI backend on localhost, or set VAULTIC_ALLOW_INSECURE_AI=1 to override.")]
+    InsecureEndpoint(String),
 }
 
 pub type AiResult<T> = Result<T, AiError>;
@@ -99,6 +102,38 @@ impl PasswordAi {
             config,
             client: reqwest::Client::new(),
         }
+    }
+
+    /// Refuse to send vault metadata to a non-loopback AI endpoint over plain
+    /// HTTP — it would travel in cleartext to another host (issue #47). Any
+    /// `https://` endpoint, and any loopback host (localhost / 127.0.0.1 /
+    /// ::1), is allowed. A non-loopback `http://` endpoint is rejected unless
+    /// the user explicitly opts in with `VAULTIC_ALLOW_INSECURE_AI=1`, in which
+    /// case a warning is printed to stderr.
+    fn ensure_endpoint_safe(url: &str) -> AiResult<()> {
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|e| AiError::RequestFailed(format!("invalid AI endpoint URL {url:?}: {e}")))?;
+        if parsed.scheme() == "https" {
+            return Ok(());
+        }
+        let host = parsed.host_str().unwrap_or_default();
+        let host_ip = host.trim_start_matches('[').trim_end_matches(']');
+        let is_loopback = host == "localhost"
+            || host_ip
+                .parse::<std::net::IpAddr>()
+                .map(|ip| ip.is_loopback())
+                .unwrap_or(false);
+        if is_loopback {
+            return Ok(());
+        }
+        if std::env::var_os("VAULTIC_ALLOW_INSECURE_AI").is_some() {
+            eprintln!(
+                "\x1b[33m⚠ Warning:\x1b[0m sending vault metadata to {url} over plain HTTP \
+                 (VAULTIC_ALLOW_INSECURE_AI is set)."
+            );
+            return Ok(());
+        }
+        Err(AiError::InsecureEndpoint(url.to_string()))
     }
 
     /// Analyze all entries and generate suggestions
@@ -248,8 +283,14 @@ impl PasswordAi {
     /// Get AI-powered suggestions (privacy-preserving)
     async fn get_ai_suggestions(&self, entries: &[VaultEntry]) -> AiResult<Vec<AiSuggestion>> {
         match &self.config.backend {
-            AiBackend::Ollama { url, model } => self.query_ollama(url, model, entries).await,
-            AiBackend::LlamaCpp { url, .. } => self.query_llamacpp(url, entries).await,
+            AiBackend::Ollama { url, model } => {
+                Self::ensure_endpoint_safe(url)?;
+                self.query_ollama(url, model, entries).await
+            }
+            AiBackend::LlamaCpp { url, .. } => {
+                Self::ensure_endpoint_safe(url)?;
+                self.query_llamacpp(url, entries).await
+            }
             AiBackend::Disabled => Ok(Vec::new()),
         }
     }
@@ -553,6 +594,7 @@ Common tags: {:?}"#,
     async fn query_tags_from_ai(&self, entry: &VaultEntry) -> AiResult<Vec<String>> {
         match &self.config.backend {
             AiBackend::Ollama { url, model } => {
+                Self::ensure_endpoint_safe(url)?;
                 let prompt = format!(
                     r#"Suggest 2-3 single-word or hyphenated tags for categorizing this password vault entry:
 Name: {}
@@ -1139,5 +1181,27 @@ mod tests {
         let tags = PasswordAi::suggest_tags(&entry);
         assert!(tags.contains(&"entertainment".to_string()));
         assert!(tags.contains(&"streaming".to_string()));
+    }
+
+    #[test]
+    fn ensure_endpoint_safe_allows_loopback_and_https() {
+        // Loopback over http (the default) and any https endpoint are fine.
+        assert!(PasswordAi::ensure_endpoint_safe("http://localhost:11434").is_ok());
+        assert!(PasswordAi::ensure_endpoint_safe("http://127.0.0.1:11434").is_ok());
+        assert!(PasswordAi::ensure_endpoint_safe("http://[::1]:11434").is_ok());
+        assert!(PasswordAi::ensure_endpoint_safe("https://ai.example.com").is_ok());
+    }
+
+    #[test]
+    fn ensure_endpoint_safe_refuses_remote_plain_http() {
+        // A non-loopback host over plain http leaks metadata in cleartext.
+        assert!(matches!(
+            PasswordAi::ensure_endpoint_safe("http://10.0.0.5:11434"),
+            Err(AiError::InsecureEndpoint(_))
+        ));
+        assert!(matches!(
+            PasswordAi::ensure_endpoint_safe("http://ollama.lan:11434"),
+            Err(AiError::InsecureEndpoint(_))
+        ));
     }
 }
