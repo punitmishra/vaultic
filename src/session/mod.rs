@@ -223,7 +223,16 @@ impl SessionInfo {
     }
 }
 
-/// Derive a machine-specific key for session encryption
+/// Derive a machine-specific key for session encryption.
+///
+/// SECURITY (issue #46): this is NOT cryptographic secrecy. The key is
+/// SHA-256(username + hostname + machine-id) and all three inputs are locally
+/// readable, so anyone who can image the machine can recompute it and decrypt
+/// the session file. The session file's real at-rest protection is the
+/// 15-minute auto-expiry and `vaultic lock`, not this key (see
+/// `docs/THREAT_MODEL.md` §3.1). Binding the session to a non-recomputable
+/// secret (OS keychain or daemon-held state) is tracked in #77 — do not treat
+/// data under this key as confidential against a disk-image attacker.
 fn derive_machine_key() -> [u8; 32] {
     use sha2::{Digest, Sha256};
 
